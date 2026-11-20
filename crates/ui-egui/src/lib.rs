@@ -740,6 +740,8 @@ pub struct PdfCraftApp {
     /// The last image copied in its original format (file name, bytes), also put on the
     /// system clipboard as a file when `system_clipboard` is on.
     pub last_copied_file: Option<(String, Vec<u8>)>,
+    /// Pictures out for editing in another app (Paint), put back on their pages at each save.
+    pub(crate) external_edits: app::ExternalEdits,
     pub system_clipboard: bool,
     /// Where Copy with formatting puts its HTML and the plain alternative instead of the system
     /// clipboard, when `system_clipboard` is on (tests).

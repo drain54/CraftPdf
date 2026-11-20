@@ -691,24 +691,15 @@ pub fn progress_notice(app: &PdfCraftApp, ctx: &egui::Context) -> bool {
     cancel
 }
 
-/// The ArtCraft wordmark (Storyteller's brand, docs/brand/; not open source), sized to `height`.
+/// The app's name where upstream shows the ArtCraft wordmark: this modified build may not carry
+/// the ArtCraft marks (docs/brand/LICENSE-brand.txt), so it names itself in plain text.
 pub fn artcraft_logo(ui: &mut egui::Ui, height: f32) -> Response {
-    let dark = ui.visuals().dark_mode;
-    let (uri, bytes): (&str, &'static [u8]) = if dark {
-        ("bytes://artcraft-logo-white.svg", include_bytes!("../../../docs/brand/artcraft-logo-white.svg"))
-    } else {
-        ("bytes://artcraft-logo.svg", include_bytes!("../../../docs/brand/artcraft-logo.svg"))
-    };
-    ui.add(egui::Image::from_bytes(uri, bytes).max_height(height).alt_text("ArtCraft"))
+    ui.label(egui::RichText::new("CraftPdf").strong().size(height * 0.8))
 }
 
-/// The ArtCraft mark (brand blue, works on light and dark), `size` points square.
+/// Empty room where upstream shows the ArtCraft mark (see [`artcraft_logo`]), `size` points square.
 pub fn artcraft_mark(ui: &mut egui::Ui, size: f32) -> Response {
-    ui.add(
-        egui::Image::from_bytes("bytes://artcraft-mark.svg", include_bytes!("../../../docs/brand/artcraft-mark.svg"))
-            .fit_to_exact_size(vec2(size, size))
-            .alt_text("ArtCraft"),
-    )
+    ui.allocate_response(vec2(size, size), egui::Sense::hover())
 }
 
 /// Buttons for every community link (`pdfcraft_engine::links`), Discord first and prominent.

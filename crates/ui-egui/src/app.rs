@@ -10,6 +10,7 @@ use super::*;
 mod clipboard;
 mod commands;
 mod control;
+mod external_edit;
 mod files;
 mod frame;
 mod input;
@@ -19,6 +20,7 @@ mod prefs;
 mod window;
 
 pub(crate) use clipboard::{ObjectClipMark, copy_refused, print_refused};
+pub(crate) use external_edit::{ExternalEdits, editor_label, page_editor_label};
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use files::same_file;
 use frame::migrate_panel_state;
@@ -292,6 +294,7 @@ impl PdfCraftApp {
             last_snapshot_of: None,
             last_copied_image: None,
             last_copied_file: None,
+            external_edits: Default::default(),
             system_clipboard: true,
             html_clipboard_override: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -792,6 +795,7 @@ impl PdfCraftApp {
         self.poll_ocr();
         self.poll_optimize();
         self.poll_scan_clean();
+        self.poll_external_edits();
         self.poll_action();
         // The OCR Verify screen's worker may have finished while no frame was drawn.
         if self.ocr_verify.phase == workflows::ocr_verify::Phase::Running {

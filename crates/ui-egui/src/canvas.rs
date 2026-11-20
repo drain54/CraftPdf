@@ -923,6 +923,8 @@ pub(crate) enum PageMenuAction {
     EditPdf,
     AddText,
     AddImage,
+    /// Open the page's picture (a scan) in another app (Paint).
+    EditPageExternally(usize),
     DeletePage(usize),
     ExportPdf,
     Find,
@@ -999,6 +1001,8 @@ pub(crate) fn default_page_context_menu(ui: &mut egui::Ui, page: usize, at: [f64
     pick(ui.add_enabled(perms.can_modify, egui::Button::new(egui::RichText::new(tl!("Edit this PDF")).strong())), ui, A::EditPdf);
     pick(ui.add_enabled(perms.can_modify, egui::Button::new(tl!("Add text"))), ui, A::AddText);
     pick(ui.add_enabled(perms.can_modify, egui::Button::new(tl!("Add image"))), ui, A::AddImage);
+    #[cfg(not(target_arch = "wasm32"))]
+    pick(ui.add_enabled(perms.can_modify, egui::Button::new(crate::app::page_editor_label())), ui, A::EditPageExternally(page));
     pick(ui.add_enabled(perms.can_assemble, egui::Button::new(tl!("Delete page"))), ui, A::DeletePage(page));
     pick(ui.add_enabled(perms.can_copy, egui::Button::new(tl!("Export this PDF"))), ui, A::ExportPdf);
 
@@ -3769,6 +3773,7 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
     match image_action {
         Some(crate::edit_text_ui::ImageAction::Replace(page, index)) => app.replace_page_image_dialog(page, index),
         Some(crate::edit_text_ui::ImageAction::Save(page, index)) => app.save_page_image(page, index),
+        Some(crate::edit_text_ui::ImageAction::EditExternally(page, index)) => app.edit_page_image_externally(page, index),
         Some(crate::edit_text_ui::ImageAction::Copy(page, index)) => {
             app.copy_page_image(page, index);
         }
@@ -3867,6 +3872,9 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
         }
         Some(PageMenuAction::AddImage) => {
             app.add_image_dialog();
+        }
+        Some(PageMenuAction::EditPageExternally(page)) => {
+            app.edit_page_externally(page);
         }
         Some(PageMenuAction::DeletePage(page)) => {
             app.views[index].pending_edit = Some(pdfcraft_engine::Edit::DeletePages { pages: vec![page] });

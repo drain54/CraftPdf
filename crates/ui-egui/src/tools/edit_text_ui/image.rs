@@ -664,6 +664,8 @@ pub(crate) fn body_hit(xf: &PageXform, page: usize, info: &DocInfo, images: &[pd
 pub enum ImageAction {
     Replace(usize, usize),
     Save(usize, usize),
+    /// Open the picture in another app (Paint); each save there updates the page.
+    EditExternally(usize, usize),
     Copy(usize, usize),
     CopyFile(usize, usize),
     /// Copy the picture, then remove it from the page.
@@ -1158,6 +1160,10 @@ pub(crate) fn image_context_menu(
     }
     if item(ui, raster, tl!("Save Image As…")) {
         *action = Some(ImageAction::Save(page, hit));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if item(ui, raster, crate::app::editor_label()) {
+        *action = Some(ImageAction::EditExternally(page, hit));
     }
 
     ui.separator();
