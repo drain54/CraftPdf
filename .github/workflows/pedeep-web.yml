@@ -4,6 +4,8 @@ name: PeDeEp web build
 # it as the "web-latest" release:
 # https://github.com/<owner>/<repo>/releases/download/web-latest/PeDeEp-web.tar.gz
 # Install on a server: packaging/pedeep-web/README.md.
+# Also deployed to GitHub Pages as an installable app (PWA) for phones:
+# https://<owner>.github.io/<repo>/  (Settings > Pages > Source must be "GitHub Actions").
 on:
   push:
     branches: [main]
@@ -11,6 +13,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: pedeep-web
@@ -67,6 +71,10 @@ jobs:
           rm -f "$SITE"/models/*.part
           cp LICENSE-MIT LICENSE-APACHE NOTICE "$SITE/"
           echo "${GITHUB_SHA::7}" > "$SITE/VERSION"
+          # PWA: a new cache per build, so phones pick up the new version.
+          sed -i "s/__PEDEEP_BUILD__/${GITHUB_SHA::12}/" "$SITE/sw.js"
+          grep -q "${GITHUB_SHA::12}" "$SITE/sw.js"
+          touch "$SITE/.nojekyll"
           tar czf dist/PeDeEp-web.tar.gz -C "$SITE" .
           ls -lh dist/PeDeEp-web.tar.gz
 
@@ -74,6 +82,10 @@ jobs:
         with:
           name: PeDeEp-web
           path: dist/PeDeEp-web.tar.gz
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/web
 
       - name: Publish as the web-latest release
         env:
@@ -85,3 +97,13 @@ jobs:
             --latest=false \
             --title "PeDeEp web (build ${{ github.run_number }})" \
             --notes "Browser build of ${GITHUB_SHA::7}. Install on a server: packaging/pedeep-web/README.md."
+
+  pages:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
