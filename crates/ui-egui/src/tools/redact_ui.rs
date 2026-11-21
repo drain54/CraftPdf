@@ -40,7 +40,8 @@ pub struct RedactPrefs {
 impl Default for RedactPrefs {
     fn default() -> Self {
         Self {
-            fill: Some([0.0, 0.0, 0.0]),
+            // PeDeEp: no box colour, white outline and white hover fill.
+            fill: None,
             use_overlay: false,
             overlay: String::new(),
             use_code: false,
@@ -48,8 +49,8 @@ impl Default for RedactPrefs {
             code_set: REDACTION_CODE_SETS[0],
             codes: Vec::new(),
             look: Default::default(),
-            outline: [0.89, 0.13, 0.13],
-            hover_fill: [0.89, 0.13, 0.13],
+            outline: [1.0, 1.0, 1.0],
+            hover_fill: [1.0, 1.0, 1.0],
             opacity: 1.0,
             remember: true,
         }

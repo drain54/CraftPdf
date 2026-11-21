@@ -710,11 +710,9 @@ fn tab(ui: &mut egui::Ui, spec: TabSpec<'_>, close: &mut Option<usize>) -> egui:
 
 /// Width the buttons at the right of the mode bar and their gaps take: info, undo, redo, save,
 /// print and the rail toggle, the 4 pt `item_spacing` after each, and the 8 pt spacer.
-const MODE_BAR_RIGHT: f32 = 6.0 * 32.0 + 6.0 * 4.0 + 8.0;
+const MODE_BAR_RIGHT: f32 = 8.0 * 32.0 + 8.0 * 4.0 + 8.0;
 /// Narrowest search field the mode bar shows; below it the field becomes an icon button.
 const MODE_BAR_SEARCH_MIN: f32 = 140.0;
-/// Narrowest split field (Find text | Find tools and commands); below it only the command search shows.
-const MODE_BAR_SPLIT_MIN: f32 = 240.0;
 /// Where the page navigation cluster's measured width is kept between frames.
 const NAV_WIDTH_KEY: &str = "pedeep-nav-cluster-width";
 /// Whether the mode bar drew the Find text field this frame (the canvas then hides its own).
@@ -820,6 +818,13 @@ pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         if icons::button(ui, "undo-2", 32.0, false, &tip).clicked() {
                             app.run_command("edit.undo");
                         }
+                        // The whole page in view goes to Paint; each save there updates it here.
+                        let paint_tip = if cfg!(windows) { tl!("Edit page in Paint") } else { tl!("Edit page in image editor") };
+                        if icons::button(ui, "brush", 32.0, false, paint_tip).clicked()
+                            && let Some(page) = app.active.and_then(|i| app.views.get(i)).map(|v| v.current)
+                        {
+                            app.edit_page_externally(page);
+                        }
                         let tip = crate::commands::command_tip(ui.ctx(), tl!("Document properties ({key})"), "file.properties");
                         if icons::button(ui, "info", 32.0, false, &tip).clicked() {
                             app.dialog = Some(Dialog::Properties(PropsTab::Description));
@@ -827,17 +832,15 @@ pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     });
                     ui.add_space(8.0);
                     let search_w = (left - MODE_BAR_RIGHT - nav_need).clamp(0.0, 420.0);
-                    let opened = if search_w >= MODE_BAR_SPLIT_MIN {
-                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(TOP_FIND_KEY), true));
-                        split_search(app, ui, &t, search_w)
-                    } else if search_w >= MODE_BAR_SEARCH_MIN {
-                        widgets::search_box(ui, tl!("Find tools and commands"), search_w).clicked()
-                    } else {
-                        // Too narrow for the field: a button opens the same command search.
-                        icons::button(ui, "search", 32.0, false, tl!("Find tools and commands")).clicked()
-                    };
-                    if opened {
+                    // Find tools and commands: a button. Find text: a field, when there is room.
+                    let tip = crate::commands::command_tip(ui.ctx(), tl!("Find tools and commands ({key})"), "view.palette");
+                    if icons::button(ui, "search", 32.0, false, &tip).clicked() {
                         app.palette_open = true;
+                    }
+                    let find_w = (search_w - 36.0).min(210.0);
+                    if find_w >= MODE_BAR_SEARCH_MIN {
+                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(TOP_FIND_KEY), true));
+                        find_box(app, ui, &t, find_w);
                     }
                     // The page navigation cluster, centred on the bar in the room that is left.
                     if has_doc {
@@ -861,47 +864,14 @@ pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
         });
 }
 
-/// One field split in two by a clear line: Find text (in the document) on the left, Find tools
-/// and commands on the right. Returns whether the right half was clicked (open the palette).
-fn split_search(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, width: f32) -> bool {
+/// The Find text field in a rounded box `width` wide.
+fn find_box(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, width: f32) {
     let (rect, _) = ui.allocate_exact_size(vec2(width, 32.0), Sense::hover());
-    let mid = (rect.left() + rect.width() * 0.5).round();
-    let left = Rect::from_min_max(rect.min, egui::pos2(mid, rect.bottom()));
-    let right = Rect::from_min_max(egui::pos2(mid, rect.top()), rect.max);
-    let palette = ui.interact(right, egui::Id::new("pedeep-palette-half"), Sense::click());
-    let label = tl!("Find tools and commands");
-    palette.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
-    let press = theme::Press::track(ui, &palette);
-    let painter = ui.painter();
-    painter.rect(rect, CornerRadius::same(16), t.field, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-    let wash = press.fill(Color32::TRANSPARENT, t.hover, t.pressed);
-    if wash.a() > 0 {
-        painter.rect_filled(right.shrink(1.0), CornerRadius { nw: 0, sw: 0, ne: 15, se: 15 }, wash);
-    }
-    // The dividing line: full contrast, so the two fields read as two.
-    painter.vline(mid, rect.y_range().shrink(5.0), Stroke::new(1.5, t.text_muted));
-    // Right half: the command search, as `widgets::search_box` draws it.
-    icons::paint(ui, Rect::from_min_size(right.min + vec2(10.0, 8.0), vec2(16.0, 16.0)), "search", 15.0, t.text_muted);
-    let shortcut = crate::commands::command_shortcut_label(ui.ctx(), "view.palette");
-    let shortcut = ui.painter().layout_no_wrap(shortcut, theme::regular(11.5), t.text_faint);
-    let shortcut_pos = right.right_center() - vec2(12.0 + shortcut.size().x, shortcut.size().y * 0.5);
-    let text_right = (shortcut_pos.x - 8.0).max(right.left());
-    let text_left = (right.left() + 32.0).min(text_right);
-    let text_rect = Rect::from_min_max(egui::pos2(text_left, right.top()), egui::pos2(text_right, right.bottom()));
-    let mut job = egui::text::LayoutJob::simple_singleline(label.to_owned(), theme::regular(13.0), t.text_faint);
-    job.wrap = egui::text::TextWrapping { max_width: text_rect.width().max(1.0), max_rows: 1, break_anywhere: true, ..Default::default() };
-    let text = ui.fonts_mut(|f| f.layout_job(job));
-    let elided = text.elided;
-    ui.painter().with_clip_rect(text_rect).galley(egui::pos2(text_left, right.center().y - text.size().y * 0.5), text, t.text_faint);
-    ui.painter().with_clip_rect(right).galley(shortcut_pos, shortcut, t.text_faint);
-    let palette = palette.on_hover_cursor(egui::CursorIcon::PointingHand);
-    let palette = if elided { palette.on_hover_text(label) } else { palette };
-    // Left half: the document's find field.
-    let inner = Rect::from_min_max(left.min + vec2(10.0, 0.0), left.max - vec2(6.0, 0.0));
+    ui.painter().rect(rect, CornerRadius::same(16), t.field, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    let inner = Rect::from_min_max(rect.min + vec2(10.0, 0.0), rect.max - vec2(6.0, 0.0));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)));
-    child.set_clip_rect(left.intersect(ui.clip_rect()));
+    child.set_clip_rect(rect.intersect(ui.clip_rect()));
     find_text_field(app, &mut child, t);
-    palette.clicked()
 }
 
 /// The Find text field of the mode bar, bound to the active tab's search: typing searches, Enter
@@ -978,29 +948,28 @@ fn find_text_field(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     }
 }
 
-/// The page tools that were at the foot of the rail, in a row: dock side, page display, rotate,
+/// The page tools that were at the foot of the rail, in a row: Select and Hand, page display, rotate,
 /// fit | zoom | view history and page navigation. Returns the width it took.
 fn nav_cluster(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) -> f32 {
     let Some((index, id)) = app.active_ids() else { return 0.0 };
     let Some(doc) = app.session.get(id) else { return 0.0 };
     let page_count = doc.info.pages.len();
     let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
-    let right = app.side_panels.rail_on_right();
     let start = ui.cursor().left();
-    let mut dock = false;
     let mut page_display = None;
-    let Some(view) = app.views.get_mut(index) else { return 0.0 };
     ui.spacing_mut().item_spacing.x = 2.0;
+    // Select and Hand, moved here from the rail.
+    crate::hotbar::pointer_tool_buttons(ui, app, 28.0);
+    ui.add_space(4.0);
+    ui.painter().vline(ui.cursor().left(), ui.max_rect().y_range().shrink(14.0), Stroke::new(1.0, t.divider));
+    ui.add_space(5.0);
+    let Some(view) = app.views.get_mut(index) else { return 0.0 };
     let divider = |ui: &mut egui::Ui| {
         ui.add_space(4.0);
         ui.painter().vline(ui.cursor().left(), ui.max_rect().y_range().shrink(14.0), Stroke::new(1.0, t.divider));
         ui.add_space(5.0);
     };
     const B: f32 = 28.0;
-    let dock_tip = if right { tl!("Dock navigation rail on Left") } else { tl!("Dock navigation rail on Right") };
-    if icons::button(ui, "arrow-left-right", B, false, dock_tip).clicked() {
-        dock = true;
-    }
     let tip = crate::i18n::fmt(tl!("Page display: {layout}"), &[("layout", tl!(view.layout.label()))]);
     let resp = icons::button(ui, view.layout.icon(), B, false, &tip);
     page_display = egui::Popup::menu(&resp)
@@ -1054,6 +1023,18 @@ fn nav_cluster(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) -> f32 {
             view.set_zoom(zoom);
         }
     }
+    // Zoom presets, with 80, 85 and 90 % among them.
+    let presets = icons::button(ui, "chevron-down", 18.0, false, tl!("Zoom presets"));
+    egui::Popup::menu(&presets).show(|ui| {
+        ui.set_min_width(90.0);
+        for pct in [50u16, 75, 80, 85, 90, 100, 110, 125, 150, 200, 300, 400] {
+            let on = (view.zoom * 100.0).round() as u16 == pct;
+            if ui.add(egui::Button::selectable(on, format!("{pct}%"))).clicked() {
+                view.set_zoom(f32::from(pct) / 100.0);
+                ui.close();
+            }
+        }
+    });
     let tip = crate::commands::key_tip(ui.ctx(), tl!("Zoom in ({key})"), crate::commands::ZOOM_IN);
     if icons::button(ui, "zoom-in", B, false, &tip).clicked() {
         view.zoom_step(true);
@@ -1109,9 +1090,6 @@ fn nav_cluster(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) -> f32 {
         view.view_history(true);
     }
     let width = ui.cursor().left() - start;
-    if dock {
-        app.side_panels.rail_side = if right { crate::side_panels::ToolsSide::Left } else { crate::side_panels::ToolsSide::Right };
-    }
     if let Some(id) = page_display {
         app.execute(id);
     }

@@ -208,12 +208,22 @@ fn tool_buttons(ui: &mut egui::Ui, app: &PdfCraftApp, tools: &[String], cell: f3
 
 /// Render core quick tools: Select, Hand, Comment groups, Edit text, and Fill & Sign.
 fn core_tool_buttons(ui: &mut egui::Ui, app: &mut PdfCraftApp, cell: f32, popup_align: egui::RectAlign, t: &Tokens) {
+    pointer_tool_buttons(ui, app, cell);
+    other_tool_buttons(ui, app, cell, popup_align, t);
+}
+
+/// Select and Hand (the mode bar shows them in PeDeEp).
+pub(crate) fn pointer_tool_buttons(ui: &mut egui::Ui, app: &mut PdfCraftApp, cell: f32) {
     if icons::button(ui, "mouse-pointer-2", cell, app.quick_tool == QuickTool::Select, tl!("Select (V)")).clicked() {
         app.quick_tool = QuickTool::Select;
     }
     if icons::button(ui, "hand", cell, app.quick_tool == QuickTool::Hand, tl!("Hand (H)")).clicked() {
         app.quick_tool = QuickTool::Hand;
     }
+}
+
+/// The quick tools after Select and Hand: Crop, the comment groups, Edit text and E-Sign.
+fn other_tool_buttons(ui: &mut egui::Ui, app: &mut PdfCraftApp, cell: f32, popup_align: egui::RectAlign, t: &Tokens) {
     let may_crop = command("page.crop").is_some_and(|spec| app.command_enabled(spec));
     ui.add_enabled_ui(may_crop, |ui| {
         if icons::button(ui, "crop", cell, app.quick_tool == QuickTool::Crop, tl!("Crop pages")).clicked() {
@@ -993,7 +1003,13 @@ pub(crate) fn rail_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, rail_on_rig
         let room = ui.available_height().max(cell);
         egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
             ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                core_tool_buttons(ui, app, cell, popup_align, &t);
+                // Where Select was: dock the rail on the other side.
+                let dock_tip = if rail_on_right { tl!("Dock navigation rail on Left") } else { tl!("Dock navigation rail on Right") };
+                if icons::button(ui, "arrow-left-right", cell, false, dock_tip).clicked() {
+                    app.side_panels.rail_side =
+                        if rail_on_right { crate::side_panels::ToolsSide::Left } else { crate::side_panels::ToolsSide::Right };
+                }
+                other_tool_buttons(ui, app, cell, popup_align, &t);
                 active_tool_controls(ui, app, &t, true);
                 if !bar.tools.is_empty() {
                     ui.separator();

@@ -40,6 +40,11 @@ struct Gesture {
 }
 
 impl ObjectSelection {
+    /// Something on a page is selected (Esc clears it before it leaves Edit).
+    pub(crate) fn is_active(&self) -> bool {
+        self.page.is_some()
+    }
+
     /// Clear any object-selection gesture.
     pub(crate) fn cancel_pointer_gesture(&mut self) {
         self.gesture = None;

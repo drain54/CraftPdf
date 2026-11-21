@@ -60,6 +60,21 @@ impl PdfCraftApp {
         {
             self.set_full_screen(ctx, false);
         }
+        // PeDeEp: Esc leaves Edit (once nothing on the page takes it first: a selection, an open
+        // paragraph, a menu or a field being typed in).
+        let editing_something = self
+            .active
+            .and_then(|i| self.views.get(i))
+            .is_some_and(|v| v.objects.is_active() || v.line_editor.is_some() || v.image_selection.is_some());
+        if self.mode == crate::Mode::Edit
+            && self.combine_tab.preview.is_none()
+            && !page_takes_escape
+            && !editing_something
+            && !ctx.egui_wants_keyboard_input()
+            && self.page_keys.take(ctx, Key::Escape)
+        {
+            self.switch_mode(crate::Mode::AllTools, true);
+        }
         if let Some(i) = self.active {
             if page_chords && chords {
                 self.select_all_keys(i, ctx);

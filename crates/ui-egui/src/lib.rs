@@ -744,6 +744,10 @@ pub struct PdfCraftApp {
     pub(crate) external_edits: app::ExternalEdits,
     /// The navigation rail is hidden (the mode bar's rail button shows it again).
     pub(crate) rail_hidden: bool,
+    /// Edit with OCR (`true`) or without, as answered for each scanned document.
+    pub(crate) ocr_edit_choice: std::collections::HashMap<DocId, bool>,
+    /// A scanned document waiting for that answer.
+    pub(crate) ocr_edit_ask: Option<DocId>,
     /// Saved signatures for E-Sign, last used first (at most `fill_sign::MAX_SIGNATURES`).
     pub(crate) signatures: Vec<fill_sign::SavedSig>,
     /// Previews of `signatures`, by position.

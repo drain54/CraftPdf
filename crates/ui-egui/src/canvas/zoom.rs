@@ -317,7 +317,7 @@ impl DocView {
 
     /// Standard zoom steps (as in Acrobat's zoom menu).
     pub fn zoom_step(&mut self, up: bool) {
-        const STEPS: [f32; 17] = [0.1, 0.25, 0.33, 0.5, 0.66, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 32.0];
+        const STEPS: [f32; 20] = [0.1, 0.25, 0.33, 0.5, 0.66, 0.75, 0.8, 0.85, 0.9, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 32.0];
         let z = self.zoom;
         let next = if up { STEPS.iter().copied().find(|s| *s > z * 1.01) } else { STEPS.iter().rev().copied().find(|s| *s < z * 0.99) };
         if let Some(n) = next {

@@ -1983,35 +1983,10 @@ fn finish_actions(app: &mut PdfCraftApp, req: &mut Pending) {
     }
 }
 
-/// Redaction, hidden-data and field-properties requests.
-fn finish_redactions_and_fields(app: &mut PdfCraftApp, req: &mut Pending) {
-    match req.redact_now.take() {
-        Some(Dialog::RedactPages) => app.redact_pages(),
-        Some(Dialog::RedactSearch) => {
-            let n = app.redact_search();
-            app.redact_search.found = Some(n);
-        }
-        Some(Dialog::RemoveHidden) => {
-            let which: Vec<pdfcraft_engine::Hidden> = app.hidden_draft.found.iter().filter(|f| f.2 && f.1 > 0).map(|f| f.0).collect();
-            let n: usize = app.hidden_draft.found.iter().filter(|f| f.2).map(|f| f.1).sum();
-            if app.apply_edit(Edit::RemoveHidden { which }) {
-                if let Some((_, id)) = app.active_ids() {
-                    app.renew_recovery(id);
-                }
-                if n == 1 {
-                    app.notify_tr("Removed 1 hidden item. Save to remove them from the file.");
-                } else {
-                    app.notify_fmt("Removed {n} hidden items. Save to remove them from the file.", &[("n", &n.to_string())]);
-                }
-            }
-        }
-        Some(Dialog::Sanitize) if app.apply_edit(Edit::Sanitize) => {
-            if let Some((_, id)) = app.active_ids() {
-                app.renew_recovery(id);
-            }
-            app.notify_tr("Document sanitized. Save to finish: saving rewrites the whole file.");
-        }
-        Some(Dialog::RedactApply) => {
+/// Apply every redaction mark of the active document (Redact all), with no confirmation.
+pub(crate) fn apply_redactions_now(app: &mut PdfCraftApp) {
+    {
+        {
             let marks = app.active_ids().and_then(|(_, id)| app.session.get(id)).map_or(0, |d| d.redaction_marks());
             if app.apply_edit(Edit::ApplyRedactions { pages: None }) {
                 if let Some(view) = app.active.and_then(|i| app.views.get_mut(i)) {
@@ -2041,6 +2016,38 @@ fn finish_redactions_and_fields(app: &mut PdfCraftApp, req: &mut Pending) {
                 app.notify(message);
             }
         }
+    }
+}
+
+/// Redaction, hidden-data and field-properties requests.
+fn finish_redactions_and_fields(app: &mut PdfCraftApp, req: &mut Pending) {
+    match req.redact_now.take() {
+        Some(Dialog::RedactPages) => app.redact_pages(),
+        Some(Dialog::RedactSearch) => {
+            let n = app.redact_search();
+            app.redact_search.found = Some(n);
+        }
+        Some(Dialog::RemoveHidden) => {
+            let which: Vec<pdfcraft_engine::Hidden> = app.hidden_draft.found.iter().filter(|f| f.2 && f.1 > 0).map(|f| f.0).collect();
+            let n: usize = app.hidden_draft.found.iter().filter(|f| f.2).map(|f| f.1).sum();
+            if app.apply_edit(Edit::RemoveHidden { which }) {
+                if let Some((_, id)) = app.active_ids() {
+                    app.renew_recovery(id);
+                }
+                if n == 1 {
+                    app.notify_tr("Removed 1 hidden item. Save to remove them from the file.");
+                } else {
+                    app.notify_fmt("Removed {n} hidden items. Save to remove them from the file.", &[("n", &n.to_string())]);
+                }
+            }
+        }
+        Some(Dialog::Sanitize) if app.apply_edit(Edit::Sanitize) => {
+            if let Some((_, id)) = app.active_ids() {
+                app.renew_recovery(id);
+            }
+            app.notify_tr("Document sanitized. Save to finish: saving rewrites the whole file.");
+        }
+        Some(Dialog::RedactApply) => apply_redactions_now(app),
         _ => {}
     }
     if req.bulk_field_props_now {

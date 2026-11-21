@@ -38,6 +38,9 @@ struct ExternalEdit {
     path: std::path::PathBuf,
     /// Quarter turns clockwise the file was given to show upright; undone on the way back.
     turns: u8,
+    /// The whole page went out, rendered at this many pixels per point (`index` unused): what
+    /// comes back replaces the page.
+    whole_page: Option<f32>,
     /// The file's version last put on the page (or written by us).
     seen: Option<Stamp>,
     /// A newer version, taken once it holds still for one more look: the other app may still be
@@ -111,28 +114,108 @@ fn file_name(doc: &str, page: usize, index: usize) -> String {
     let stem = doc.rsplit_once('.').map_or(doc, |(s, _)| s);
     let clean: String = stem.chars().map(|c| if c.is_alphanumeric() || " -_()".contains(c) { c } else { '_' }).take(60).collect();
     let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 1_000_000);
+    if index == usize::MAX {
+        return format!("{} - page {} ({unique}).png", clean.trim(), page + 1);
+    }
     format!("{} - page {} picture {} ({unique}).png", clean.trim(), page + 1, index + 1)
 }
 
 impl PdfCraftApp {
-    /// Page right-click ▸ Edit page in Paint: the page's largest picture (a scan's page image).
+    /// Page right-click ▸ Edit page in Paint, and the mode bar's button. A plain scan (no text,
+    /// one picture covering most of the page) sends its picture, which keeps the scan's own
+    /// pixels; any other page (text, OCR'd and edited text included) goes as one whole picture.
     pub(crate) fn edit_page_externally(&mut self, page: usize) {
         let Some((_, id)) = self.active_ids() else { return };
-        let largest = self.session.get(id).and_then(|d| {
-            let area = |r: [f64; 4]| ((r[2] - r[0]) * (r[3] - r[1])).abs();
-            d.page_images(page)
-                .iter()
-                .enumerate()
-                .filter(|(_, img)| !img.is_form && img.width > 0 && img.height > 0)
-                .max_by(|(_, a), (_, b)| area(a.visible_rect.unwrap_or(a.rect)).total_cmp(&area(b.visible_rect.unwrap_or(b.rect))))
-                .map(|(i, _)| i)
-        });
+        let Some(d) = self.session.get(id) else { return };
+        let area = |r: [f64; 4]| ((r[2] - r[0]) * (r[3] - r[1])).abs();
+        let page_area = d.info.pages.get(page).map_or(0.0, |p| f64::from(p.width) * f64::from(p.height));
+        let largest = d
+            .page_images(page)
+            .iter()
+            .enumerate()
+            .filter(|(_, img)| !img.is_form && img.width > 0 && img.height > 0)
+            .map(|(i, img)| (i, area(img.visible_rect.unwrap_or(img.rect))))
+            .max_by(|a, b| a.1.total_cmp(&b.1));
+        let plain_scan = d.text_lines(page).is_empty() && largest.is_some_and(|(_, a)| page_area > 0.0 && a >= page_area * 0.5);
         match largest {
-            Some(index) => self.edit_page_image_externally(page, index),
-            None => self.notify_fmt(
-                "Page {p} has no picture to edit. Only scanned pages and pictures can be edited in another app",
-                &[("p", &(page + 1).to_string())],
-            ),
+            Some((index, _)) if plain_scan => self.edit_page_image_externally(page, index),
+            _ => self.edit_whole_page_externally(page),
+        }
+    }
+
+    /// The whole page, as one picture, in the image editor.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn edit_whole_page_externally(&mut self, _page: usize) {
+        self.notify_tr("Editing pictures in another app needs the desktop version");
+    }
+
+    /// The whole page, as one picture, in the image editor: rendered as shown (comments left
+    /// out: they stay on the page), and each save there replaces the page.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn edit_whole_page_externally(&mut self, page: usize) {
+        let Some((_, id)) = self.active_ids() else { return };
+        if let Some(open) = self.external_edits.open.iter().find(|e| e.doc == id && e.page == page && e.whole_page.is_some()) {
+            let path = open.path.clone();
+            if let Err(e) = launch(&path) {
+                self.notify_fmt("Couldn't open the image editor: {e}", &[("e", &e.to_string())]);
+            }
+            return;
+        }
+        let prepared = (|| -> Result<(std::path::PathBuf, f32), String> {
+            let doc = self.session.get(id).ok_or_else(|| tl!("The document is no longer open").to_string())?;
+            if !doc.allows_modification() {
+                return Err(tl!("The document's security settings don't allow this change").to_string());
+            }
+            let p = doc.info.pages.get(page).ok_or_else(|| tl!("The page is no longer in the document").to_string())?;
+            let side = (f64::from(p.width).max(f64::from(p.height))) as f32;
+            // 200 dpi, and no side past 6000 pixels.
+            let scale = (200.0f32 / 72.0).min(6000.0 / side.max(1.0));
+            let config = pdfcraft_render::RenderConfig {
+                password: doc.password.as_deref().map(std::sync::Arc::from),
+                hide_comments: true,
+                ..Default::default()
+            };
+            let out = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), config).render(pdfcraft_render::RenderRequest {
+                page,
+                scale,
+                ..Default::default()
+            });
+            if let Some(e) = out.error {
+                return Err(e);
+            }
+            let png = png_of(out.width, out.height, &out.rgba)?;
+            let dir = std::env::temp_dir().join("PeDeEp edits");
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let path = dir.join(file_name(&doc.name, page, usize::MAX));
+            std::fs::write(&path, png).map_err(|e| e.to_string())?;
+            Ok((path, scale))
+        })();
+        let (path, scale) = match prepared {
+            Ok(p) => p,
+            Err(e) => {
+                self.notify_fmt("Couldn't edit the page: {e}", &[("e", &e)]);
+                return;
+            }
+        };
+        if let Err(e) = launch(&path) {
+            let _ = std::fs::remove_file(&path);
+            self.notify_fmt("Couldn't open the image editor: {e}", &[("e", &e.to_string())]);
+            return;
+        }
+        let seen = stamp(&path);
+        self.external_edits.open.push(ExternalEdit {
+            doc: id,
+            page,
+            index: usize::MAX,
+            path,
+            turns: 0,
+            whole_page: Some(scale),
+            seen,
+            settling: None,
+        });
+        self.notify_fmt("Each save in the image editor replaces page {p} here", &[("p", &(page + 1).to_string())]);
+        if let Some(ctx) = &self.ctx {
+            ctx.request_repaint_after(LOOK_EVERY);
         }
     }
 
@@ -147,7 +230,7 @@ impl PdfCraftApp {
     pub(crate) fn edit_page_image_externally(&mut self, page: usize, index: usize) {
         let Some((view, id)) = self.active_ids() else { return };
         // Already out for editing: bring its file up again rather than start a second copy.
-        if let Some(open) = self.external_edits.open.iter().find(|e| e.doc == id && e.page == page && e.index == index) {
+        if let Some(open) = self.external_edits.open.iter().find(|e| e.doc == id && e.page == page && e.whole_page.is_none() && e.index == index) {
             let path = open.path.clone();
             if let Err(e) = launch(&path) {
                 self.notify_fmt("Couldn't open the image editor: {e}", &[("e", &e.to_string())]);
@@ -188,7 +271,7 @@ impl PdfCraftApp {
             return;
         }
         let seen = stamp(&path);
-        self.external_edits.open.push(ExternalEdit { doc: id, page, index, path, turns, seen, settling: None });
+        self.external_edits.open.push(ExternalEdit { doc: id, page, index, path, turns, whole_page: None, seen, settling: None });
         self.notify_fmt("Each save in the image editor updates page {p} here", &[("p", &(page + 1).to_string())]);
         if let Some(ctx) = &self.ctx {
             ctx.request_repaint_after(LOOK_EVERY);
@@ -249,7 +332,7 @@ impl PdfCraftApp {
         let Some(version) = e.settling.take() else { return };
         // Taken or refused, this version is dealt with: it isn't tried again.
         e.seen = Some(version);
-        let (doc, page, index, turns, path) = (e.doc, e.page, e.index, e.turns, e.path.clone());
+        let (doc, page, index, turns, whole, path) = (e.doc, e.page, e.index, e.turns, e.whole_page, e.path.clone());
         let png = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| {
             let img = craft_image_codecs::decode(&bytes).map_err(|e| e.to_string())?;
             let (w, h) = img.dimensions();
@@ -268,10 +351,24 @@ impl PdfCraftApp {
         // The edit goes to the document the picture came from, shown so its change can be seen.
         self.active = Some(view);
         let name = path.file_name().map_or_else(|| "edited.png".to_owned(), |n| n.to_string_lossy().into_owned());
-        let edit = pdfcraft_engine::Edit::EditPageImage {
-            page,
-            index,
-            change: pdfcraft_engine::ImageEdit::Replace { name, bytes: std::sync::Arc::new(png) },
+        let edit = match whole {
+            // The whole page: a one-page PDF of the picture, at the size the page was shown, in
+            // the page's place.
+            Some(scale) => {
+                let dpi = f64::from(72.0 * scale).clamp(1.0, 1200.0);
+                match self.session.create_from_images_with_resolution(&[(name.clone(), png)], pdfcraft_engine::ImageResolution::Dpi(dpi)) {
+                    Ok(bytes) => pdfcraft_engine::Edit::ReplacePages { pages: vec![page], name, bytes, src_pages: vec![0] },
+                    Err(e) => {
+                        self.notify_fmt("Couldn't read the edited picture: {e}", &[("e", &e.to_string())]);
+                        return;
+                    }
+                }
+            }
+            None => pdfcraft_engine::Edit::EditPageImage {
+                page,
+                index,
+                change: pdfcraft_engine::ImageEdit::Replace { name, bytes: std::sync::Arc::new(png) },
+            },
         };
         if self.apply_edit(edit) {
             self.notify_fmt("Page {p} updated from the image editor", &[("p", &(page + 1).to_string())]);

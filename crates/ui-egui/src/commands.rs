@@ -830,7 +830,8 @@ impl PdfCraftApp {
                 if marks == 0 {
                     self.notify_tr("There are no redaction marks to apply");
                 } else {
-                    self.dialog = Some(Dialog::RedactApply);
+                    // PeDeEp: Redact all applies at once, without the confirmation.
+                    crate::dialogs::apply_redactions_now(self);
                 }
             }
             "redact.sanitize" => self.dialog = Some(Dialog::Sanitize),

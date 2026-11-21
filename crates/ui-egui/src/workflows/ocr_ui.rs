@@ -473,6 +473,15 @@ impl PdfCraftApp {
     /// Without an engine the page waits for one (see [`Self::await_ocr_models`]).
     pub(crate) fn auto_ocr_scanned_page(&mut self) {
         let Some(scan) = self.scan_to_read() else { return };
+        // PeDeEp: ask first, once per document, whether to edit the scan with OCR.
+        match self.ocr_edit_choice.get(&scan.doc) {
+            Some(true) => {}
+            Some(false) => return,
+            None => {
+                self.ocr_edit_ask = Some(scan.doc);
+                return;
+            }
+        }
         // the engine this run will use, not always the built-in one
         let mut settings = self.ocr_draft.settings();
         if pdfcraft_engine::ocr::engine_unavailable_reason(settings.engine).is_some() {
@@ -486,6 +495,42 @@ impl PdfCraftApp {
         settings.skip_text_pages = true;
         settings.native_text_only = true;
         self.start_ocr_pages(scan.doc, &[scan.page], settings, true);
+    }
+
+    /// Edit opened on a scanned document: Edit with OCR (its words become editable text) or
+    /// without (the pages stay pictures). Asked once per document; Esc means without.
+    pub(crate) fn ocr_edit_prompt(&mut self) {
+        let Some(doc) = self.ocr_edit_ask else { return };
+        if self.session.get(doc).is_none() || self.mode != crate::Mode::Edit {
+            self.ocr_edit_ask = None;
+            return;
+        }
+        let Some(ctx) = self.ctx.clone() else { return };
+        let mut answer = None;
+        let modal = widgets::show_modal(&ctx, "pedeep-ocr-edit", |ui| {
+            ui.set_width(400.0);
+            ui.label(egui::RichText::new(tl!("This PDF is a scan")).font(theme::semibold(17.0)));
+            ui.add_space(6.0);
+            ui.label(tl!(
+                "Edit it with OCR? The text on its pages is recognized so you can edit it as text. Without OCR the pages stay pictures; you can still edit them in Paint."
+            ));
+            ui.add_space(12.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if widgets::pill_button(ui, tl!("Edit with OCR"), true).clicked() {
+                    answer = Some(true);
+                }
+                if widgets::pill_button(ui, tl!("Without OCR"), false).clicked() {
+                    answer = Some(false);
+                }
+            });
+        });
+        if answer.is_none() && modal.should_close() {
+            answer = Some(false);
+        }
+        if let Some(yes) = answer {
+            self.ocr_edit_choice.insert(doc, yes);
+            self.ocr_edit_ask = None;
+        }
     }
 
     /// Edit found a scan but no engine can read it. The page is set aside until one can (rather

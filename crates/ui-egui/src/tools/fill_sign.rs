@@ -87,6 +87,12 @@ pub struct SigDraft {
     pub image_mode: bool,
     /// The Image or Scan tab's result.
     pub image: Option<SignatureImage>,
+    /// The Image tab's file as imported, before its background is taken out.
+    pub image_source: Option<SignatureImage>,
+    /// Take the paper (near-white background) out of the imported image.
+    pub remove_bg: bool,
+    /// How much counts as background, 0–100 (more takes out greyer paper).
+    pub bg_strength: u8,
     /// The Scan tab: a photo of a signature on paper, cleaned into `image`.
     pub scan_mode: bool,
     pub scan: Option<ScanDraft>,
@@ -399,6 +405,16 @@ pub(crate) fn script_preview(text: &str, w: usize, h: usize) -> egui::ColorImage
     img
 }
 
+/// `image` with its near-white background taken out at `strength` (0–100), or as it is.
+pub(crate) fn without_background(image: &SignatureImage, remove: bool, strength: u8) -> SignatureImage {
+    if !remove {
+        return image.clone();
+    }
+    // Strength 0 takes out only pure white paper (as before); 100 takes out light grey too.
+    let cutoff = 250u8.saturating_sub(strength.min(100));
+    image.remove_white_background(cutoff, 35).unwrap_or_else(|_| image.clone())
+}
+
 /// How many signatures E-Sign keeps; past it, the one used least recently goes.
 pub(crate) const MAX_SIGNATURES: usize = 20;
 
@@ -432,10 +448,12 @@ pub(crate) fn signature_library(ui: &mut egui::Ui, app: &mut crate::PdfCraftApp,
     let placing = app.quick_tool == crate::QuickTool::Fill(FillTool::Signature);
     let (mut pick, mut remove) = (None, None);
     let row_h = 52.0;
+    // As tall as the panel leaves (room kept for the note and the lock checkbox under it).
+    let room = (ui.available_height() - 64.0).max(row_h + 4.0);
     let signatures = &app.signatures;
     let previews = &mut app.signature_list_previews;
     let current = app.signature.as_ref();
-    egui::ScrollArea::vertical().id_salt("pedeep-signature-library").max_height(3.0 * (row_h + 4.0)).auto_shrink([false, true]).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("pedeep-signature-library").max_height(room).auto_shrink([false, true]).show(ui, |ui| {
         for (i, sig) in signatures.iter().enumerate() {
             let on = placing && current == Some(sig);
             ui.horizontal(|ui| {
@@ -463,10 +481,10 @@ pub(crate) fn signature_library(ui: &mut egui::Ui, app: &mut crate::PdfCraftApp,
             ui.add_space(4.0);
         }
     });
-    if app.signatures.len() > 3 {
+    if app.signatures.len() > 1 {
         ui.label(
             egui::RichText::new(crate::i18n::fmt(
-                tl!("{n} of {max} saved · scroll for more"),
+                tl!("{n} of {max} saved"),
                 &[("n", &app.signatures.len().to_string()), ("max", &MAX_SIGNATURES.to_string())],
             ))
             .font(crate::theme::regular(11.0))
@@ -846,6 +864,21 @@ pub(crate) fn signature_pad(
         if let Some(image) = &d.image {
             image_preview(ui, rect.shrink(8.0), image, preview);
         }
+        if let Some(source) = d.image_source.clone() {
+            ui.add_space(4.0);
+            let mut redo = ui.add(crate::widgets::checkbox(&mut d.remove_bg, tl!("Remove background"))).changed();
+            if d.remove_bg {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tl!("Strength")).color(t.text_muted));
+                    let slider = ui.add(egui::Slider::new(&mut d.bg_strength, 0..=100).show_value(false));
+                    // Worked out when the slider is let go: each pass rewrites the whole image.
+                    redo |= slider.drag_stopped() || (slider.changed() && !slider.dragged());
+                });
+            }
+            if redo {
+                d.image = Some(without_background(&source, d.remove_bg, d.bg_strength));
+            }
+        }
         let (apply, cancel) = pad_buttons(ui, d);
         return (apply, cancel, browse);
     }
@@ -1067,10 +1100,13 @@ impl crate::PdfCraftApp {
     }
 
     fn use_signature_image(&mut self, result: Result<SignatureImage, String>) {
-        let cleaned = result.and_then(|image| image.remove_white_background(245, 35).map_err(|e| e.to_string()));
-        match cleaned {
+        match result {
             Ok(image) => {
-                self.signature_draft.image = Some(image);
+                let d = &mut self.signature_draft;
+                d.remove_bg = true;
+                d.bg_strength = 50;
+                d.image = Some(without_background(&image, true, 50));
+                d.image_source = Some(image);
                 self.toast = None;
             }
             Err(e) => self.notify_fmt("Couldn't import the signature image: {e}", &[("e", &e)]),
