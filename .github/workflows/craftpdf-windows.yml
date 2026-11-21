@@ -22,6 +22,10 @@ jobs:
       # Static C runtime: no Visual C++ redistributable needed (as upstream's package.ps1).
       CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
       PDFCRAFT_BUILD_SHA: ${{ github.sha }}
+      # Build speed over the last few % of runtime speed: upstream's release profile (thin LTO,
+      # one codegen unit) compiles the biggest crates on a single core of the 4-core runner.
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
     steps:
       - uses: actions/checkout@v4
 
