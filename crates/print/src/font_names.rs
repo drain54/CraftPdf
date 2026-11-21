@@ -76,7 +76,7 @@ impl Found {
         let descriptor = font.get(b"FontDescriptor")?;
         let (program, true_type) = doc.dict(descriptor).and_then(|d| program(doc, &d))?;
         let number = self.programs.len() + 1;
-        self.programs.entry(program).or_insert_with(|| Program { name: format!("PdfCraftPrint{number}"), true_type });
+        self.programs.entry(program).or_insert_with(|| Program { name: format!("PeDeEpPrint{number}"), true_type });
         if let Object::Ref(descriptor) = descriptor {
             self.descriptors.insert(*descriptor, program);
         }

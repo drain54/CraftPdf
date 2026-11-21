@@ -297,7 +297,7 @@ impl PdfCraftApp {
             external_edits: Default::default(),
             rail_hidden: false,
             ocr_edit_choice: Default::default(),
-            ocr_edit_ask: None,
+            locked_declined: Default::default(),
             signatures: Vec::new(),
             signature_list_previews: Vec::new(),
             system_clipboard: true,
@@ -797,6 +797,7 @@ impl PdfCraftApp {
         }
         self.poll_export();
         self.auto_ocr_scanned_page();
+        self.locked_edit_prompt();
         self.poll_ocr();
         self.poll_optimize();
         self.poll_scan_clean();

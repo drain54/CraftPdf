@@ -261,7 +261,8 @@ impl PdfCraftApp {
             "optimize.reduce" => self.reduce_file_size(),
             "help.shortcuts" => self.dialog = Some(Dialog::Shortcuts),
             "help.about" => self.dialog = Some(Dialog::About),
-            "help.check_updates" => self.check_for_updates(),
+            // PeDeEp's builds come from its own releases page, not PdfCraft's update feed.
+            "help.check_updates" => self.execute("help.app_page"),
             _ => return None,
         }
         Some(true)

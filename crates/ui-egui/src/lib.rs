@@ -746,8 +746,8 @@ pub struct PdfCraftApp {
     pub(crate) rail_hidden: bool,
     /// Edit with OCR (`true`) or without, as answered for each scanned document.
     pub(crate) ocr_edit_choice: std::collections::HashMap<DocId, bool>,
-    /// A scanned document waiting for that answer.
-    pub(crate) ocr_edit_ask: Option<DocId>,
+    /// Documents locked against editing whose copy offer was answered (not asked again).
+    pub(crate) locked_declined: std::collections::HashSet<DocId>,
     /// Saved signatures for E-Sign, last used first (at most `fill_sign::MAX_SIGNATURES`).
     pub(crate) signatures: Vec<fill_sign::SavedSig>,
     /// Previews of `signatures`, by position.

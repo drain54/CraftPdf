@@ -414,7 +414,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
         // notice users know; Tesseract's reasons are catalog keys of their own.
         let text = match d.engine {
             pdfcraft_engine::ocr::EngineChoice::Tesseract => crate::i18n::t(&why).to_string(),
-            _ => tl!("Text recognition isn't installed: its model files are missing. Reinstall PdfCraft, or set PDFCRAFT_MODELS to the folder that holds them.")
+            _ => tl!("Text recognition isn't installed: its model files are missing. Reinstall PeDeEp, or set PDFCRAFT_MODELS to the folder that holds them.")
                 .to_string(),
         };
         ui.label(egui::RichText::new(text).small().color(t.text_muted));
@@ -492,29 +492,38 @@ impl PdfCraftApp {
         self.start_ocr_pages(scan.doc, &[scan.page], settings, true);
     }
 
-    /// Edit opened on a scanned document: Edit with OCR (its words become editable text) or
-    /// without (the pages stay pictures). Asked once per document; Esc means without.
-    pub(crate) fn ocr_edit_prompt(&mut self) {
-        let Some(doc) = self.ocr_edit_ask else { return };
-        if self.session.get(doc).is_none() || self.mode != crate::Mode::Edit {
-            self.ocr_edit_ask = None;
-            return;
-        }
+    /// Edit opened on a document whose security settings forbid changes: offer an editable
+    /// copy, as WPS does (a new tab, without the restrictions; the original stays as it is).
+    /// Asked once per document; Cancel or Esc leaves it read-only.
+    pub(crate) fn locked_edit_prompt(&mut self) {
+        let locked = self.active_ids().filter(|_| self.mode == crate::Mode::Edit).and_then(|(_, id)| {
+            let d = self.session.get(id)?;
+            d.permissions().is_some_and(|p| !p.modify()).then_some(id)
+        });
+        let Some(doc) = locked.filter(|id| !self.locked_declined.contains(id)) else { return };
         let Some(ctx) = self.ctx.clone() else { return };
         let mut answer = None;
-        let modal = widgets::show_modal(&ctx, "pedeep-ocr-edit", |ui| {
-            ui.set_width(400.0);
-            ui.label(egui::RichText::new(tl!("This PDF is a scan")).font(theme::semibold(17.0)));
+        let modal = widgets::show_modal(&ctx, "pedeep-locked-edit", |ui| {
+            ui.set_width(420.0);
+            ui.label(egui::RichText::new(tl!("This PDF is locked against editing")).font(theme::semibold(17.0)));
             ui.add_space(6.0);
             ui.label(tl!(
-                "Edit it with OCR? The text on its pages is recognized so you can edit it as text. Without OCR the pages stay pictures; you can still edit them in Paint."
+                "Its security settings don't allow changes. Create a copy to edit: it opens in a new tab without the restrictions, and the original file stays as it is."
             ));
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(tl!(
+                    "Only do this for documents you may change: yours, or with the owner's permission. Digital signatures don't carry over to the copy."
+                ))
+                .color(Tokens::get(ui.ctx()).text_muted)
+                .small(),
+            );
             ui.add_space(12.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if widgets::pill_button(ui, tl!("Edit with OCR"), true).clicked() {
+                if widgets::pill_button(ui, tl!("Create a copy"), true).clicked() {
                     answer = Some(true);
                 }
-                if widgets::pill_button(ui, tl!("Without OCR"), false).clicked() {
+                if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
                     answer = Some(false);
                 }
             });
@@ -522,9 +531,33 @@ impl PdfCraftApp {
         if answer.is_none() && modal.should_close() {
             answer = Some(false);
         }
-        if let Some(yes) = answer {
-            self.ocr_edit_choice.insert(doc, yes);
-            self.ocr_edit_ask = None;
+        match answer {
+            Some(true) => {
+                self.locked_declined.insert(doc);
+                self.editable_copy(doc);
+            }
+            Some(false) => {
+                self.locked_declined.insert(doc);
+            }
+            None => {}
+        }
+    }
+
+    /// Open a copy of `doc` without its security settings (so without its restrictions).
+    pub(crate) fn editable_copy(&mut self, doc: DocId) {
+        let Some(d) = self.session.get(doc) else { return };
+        let stem = std::path::Path::new(&d.name).file_stem().map_or_else(|| "Document".to_owned(), |s| s.to_string_lossy().into_owned());
+        let (bytes, password) = (d.bytes.clone(), d.password.clone());
+        let plain = pdfcraft_cos::Document::open_with_password(bytes, password.as_deref()).map_err(|e| e.to_string()).and_then(|mut cos| {
+            cos.remove_encryption();
+            pdfcraft_cos::write_full(&cos, &Default::default()).map_err(|e| e.to_string())
+        });
+        match plain {
+            Ok(plain) => {
+                self.open_created(&format!("{stem} (copy).pdf"), Arc::new(plain), tl!("Opened an editable copy"));
+                self.select_mode(crate::Mode::Edit);
+            }
+            Err(e) => self.notify_fmt("Couldn't make an editable copy: {e}", &[("e", &e)]),
         }
     }
 

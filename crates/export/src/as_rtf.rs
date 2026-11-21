@@ -9,7 +9,7 @@ use super::layout::Page;
 const FONT: &str = "Helvetica";
 
 /// The application the RTF names as its writer (`{\*\generator}`).
-pub(crate) const GENERATOR: &str = "PdfCraft";
+pub(crate) const GENERATOR: &str = "PeDeEp";
 
 /// Rich Text Format: paragraphs with their sizes, bold, italic and colours, headings, tables,
 /// pictures, and each page in a section of its own size.

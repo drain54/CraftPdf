@@ -912,10 +912,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn the_program_starts_without_a_console_window() {
-        const PROBE: &str = r#"Add-Type -Namespace PdfCraftOcrProbe -Name Console -MemberDefinition '[DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow(); [DllImport("kernel32.dll")] public static extern uint GetConsoleProcessList(uint[] ids, uint count);'
+        const PROBE: &str = r#"Add-Type -Namespace PeDeEpOcrProbe -Name Console -MemberDefinition '[DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow(); [DllImport("kernel32.dll")] public static extern uint GetConsoleProcessList(uint[] ids, uint count);'
 $ids = New-Object uint32[] 256
-$n = [PdfCraftOcrProbe.Console]::GetConsoleProcessList($ids, 256)
-"$([PdfCraftOcrProbe.Console]::GetConsoleWindow()) $($ids[0..($n-1)] -join ',')""#;
+$n = [PeDeEpOcrProbe.Console]::GetConsoleProcessList($ids, 256)
+"$([PeDeEpOcrProbe.Console]::GetConsoleWindow()) $($ids[0..($n-1)] -join ',')""#;
         let root = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
         let t = TesseractCli::new(root.join(r"System32\WindowsPowerShell\v1.0\powershell.exe"));
         let text = t.run(&["-NoProfile", "-NonInteractive", "-Command", PROBE], t.timeout, t.max_output).unwrap();
