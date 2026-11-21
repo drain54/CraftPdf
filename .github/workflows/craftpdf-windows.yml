@@ -1,7 +1,7 @@
-name: CraftPdf Windows build
+name: PeDeEp Windows build
 
 # Builds the Windows portable zip on every push to main and publishes it as the "latest" release:
-# https://github.com/<owner>/<repo>/releases/latest/download/CraftPdf-windows-x64.zip
+# https://github.com/<owner>/<repo>/releases/latest/download/PeDeEp-windows-x64.zip
 on:
   push:
     branches: [main]
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: craftpdf-windows
+  group: pedeep-windows
   cancel-in-progress: true
 
 jobs:
@@ -47,32 +47,32 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $stage = 'dist\CraftPdf'
+          $stage = 'dist\PeDeEp'
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item 'target\x86_64-pc-windows-msvc\release\pdfcraft.exe' $stage
+          Copy-Item 'target\x86_64-pc-windows-msvc\release\pdfcraft.exe' "$stage\PeDeEp.exe"
           foreach ($f in 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'packaging\windows\portable.txt', 'assets\app-icon\LICENSE-document.txt') {
             Copy-Item $f $stage
           }
           Copy-Item 'packaging\craftpdf\*.bat' $stage
-          # OCR models (Recognize Text) go in models\ beside pdfcraft.exe.
+          # OCR models (Recognize Text) go in models\ beside the exe.
           New-Item -ItemType Directory -Force -Path "$stage\models" | Out-Null
           cargo xtask models "$stage\models"
           if ($LASTEXITCODE -ne 0) { throw "cargo xtask models failed ($LASTEXITCODE)" }
           Remove-Item -Force "$stage\models\*.part" -ErrorAction SilentlyContinue
           @"
-          CraftPdf - based on PdfCraft by the ArtCraft team (https://github.com/storytold/pdfcraft).
+          PeDeEp - based on PdfCraft by the ArtCraft team (https://github.com/storytold/pdfcraft).
           Not an official ArtCraft build.
 
-          Run pdfcraft.exe. Edit a scanned page in Paint: right-click the page > "Edit page in Paint".
+          Run PeDeEp.exe. Make it the PDF app: run "Jadikan PeDeEp default PDF.bat". Edit a scanned page in Paint: right-click the page > "Edit page in Paint".
           Each Ctrl+S in Paint updates the page here (Ctrl+Z undoes it). Save the PDF when done.
           Another editor: set the CRAFTPDF_IMAGE_EDITOR environment variable to its .exe.
-          "@ | Set-Content "$stage\README-CraftPdf.txt"
-          Compress-Archive -Path $stage -DestinationPath 'dist\CraftPdf-windows-x64.zip' -Force
+          "@ | Set-Content "$stage\README-PeDeEp.txt"
+          Compress-Archive -Path $stage -DestinationPath 'dist\PeDeEp-windows-x64.zip' -Force
 
       - uses: actions/upload-artifact@v4
         with:
-          name: CraftPdf-windows-x64
-          path: dist/CraftPdf-windows-x64.zip
+          name: PeDeEp-windows-x64
+          path: dist/PeDeEp-windows-x64.zip
 
       - name: Publish as the latest release
         shell: bash
@@ -80,7 +80,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest dist/CraftPdf-windows-x64.zip \
+          gh release create latest dist/PeDeEp-windows-x64.zip \
             --target "$GITHUB_SHA" \
-            --title "CraftPdf (build ${{ github.run_number }})" \
-            --notes "Windows portable build of ${GITHUB_SHA::7}. Unzip, run pdfcraft.exe. Unsigned: Windows SmartScreen asks once (More info > Run anyway)."
+            --title "PeDeEp (build ${{ github.run_number }})" \
+            --notes "Windows portable build of ${GITHUB_SHA::7}. Unzip, run PeDeEp.exe. Unsigned: Windows SmartScreen asks once (More info > Run anyway)."

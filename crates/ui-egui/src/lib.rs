@@ -742,6 +742,12 @@ pub struct PdfCraftApp {
     pub last_copied_file: Option<(String, Vec<u8>)>,
     /// Pictures out for editing in another app (Paint), put back on their pages at each save.
     pub(crate) external_edits: app::ExternalEdits,
+    /// The navigation rail is hidden (the mode bar's rail button shows it again).
+    pub(crate) rail_hidden: bool,
+    /// Saved signatures for E-Sign, last used first (at most `fill_sign::MAX_SIGNATURES`).
+    pub(crate) signatures: Vec<fill_sign::SavedSig>,
+    /// Previews of `signatures`, by position.
+    pub(crate) signature_list_previews: Vec<Option<(fill_sign::SavedSig, egui::TextureHandle)>>,
     pub system_clipboard: bool,
     /// Where Copy with formatting puts its HTML and the plain alternative instead of the system
     /// clipboard, when `system_clipboard` is on (tests).

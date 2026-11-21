@@ -694,7 +694,7 @@ pub fn progress_notice(app: &PdfCraftApp, ctx: &egui::Context) -> bool {
 /// The app's name where upstream shows the ArtCraft wordmark: this modified build may not carry
 /// the ArtCraft marks (docs/brand/LICENSE-brand.txt), so it names itself in plain text.
 pub fn artcraft_logo(ui: &mut egui::Ui, height: f32) -> Response {
-    ui.label(egui::RichText::new("CraftPdf").strong().size(height * 0.8))
+    ui.label(egui::RichText::new("PeDeEp").strong().size(height * 0.8))
 }
 
 /// Empty room where upstream shows the ArtCraft mark (see [`artcraft_logo`]), `size` points square.

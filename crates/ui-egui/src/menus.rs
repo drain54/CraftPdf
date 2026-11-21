@@ -21,7 +21,7 @@ use crate::{PdfCraftApp, RightPanel};
 pub(super) mod tab_context;
 
 /// The app's name in the menus the layouts write (About, Hide, Quit).
-pub(crate) const APP_NAME: &str = "PdfCraft";
+pub(crate) const APP_NAME: &str = "PeDeEp";
 
 /// The top bar's width after the menus: the mode tabs, the search box and the buttons.
 const ROW_AFTER_MENUS: f32 = 720.0;
@@ -366,12 +366,13 @@ impl PdfCraftApp {
         view.push(Node::Separator);
         view.push(Node::submenu(tl!("Tools"), self.tools_menu(&used, mac)));
         view.extend(list(&["view.palette"], &mut used));
+        // PeDeEp: no Sign menu in the menu bar (E-Sign is in the mode bar).
+        drop(sign);
         let mut bar = MenuBar {
             menus: vec![
                 Menu::new(tl!("File"), craft_menu::tidy(file)).role(MenuRole::File),
                 Menu::new(tl!("Edit"), craft_menu::tidy(edit)).role(MenuRole::Edit),
                 Menu::new(tl!("View"), craft_menu::tidy(view)).role(MenuRole::View),
-                Menu::new(tl!("Sign"), craft_menu::tidy(sign)),
                 Menu::new(tl!("Window"), window).role(MenuRole::Window),
                 Menu::new(tl!("Help"), craft_menu::tidy(help)).role(MenuRole::Help),
             ],

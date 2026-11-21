@@ -169,7 +169,7 @@ impl PdfCraftApp {
             let (w, h, rgba) = doc.page_image_rgba(page, index)?;
             let (w, h, rgba) = pixels::turn_rgba(w, h, &rgba, turns).ok_or_else(|| tl!("The picture's pixels couldn't be read").to_string())?;
             let png = png_of(w, h, &rgba)?;
-            let dir = std::env::temp_dir().join("CraftPdf edits");
+            let dir = std::env::temp_dir().join("PeDeEp edits");
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
             let path = dir.join(file_name(&doc.name, page, index));
             std::fs::write(&path, png).map_err(|e| e.to_string())?;

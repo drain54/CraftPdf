@@ -43,6 +43,20 @@ fn score_for_direction(hay: &str, needle: &str, rtl: bool) -> Option<usize> {
     needle.chars().all(|c| it.any(|x| x == c)).then_some(100)
 }
 
+/// The content width that fits the widest entry listed: icon, label, a 24 pt gap, the detail
+/// (shortcut, menu or tool group) and the row's right padding.
+fn palette_width(hits: &[(usize, Hit)], ui: &egui::Ui) -> f32 {
+    let (label_font, detail_font) = (theme::regular(13.5), theme::regular(12.0));
+    hits.iter()
+        .map(|(_, h)| {
+            let label = crate::i18n::command_label(&h.label);
+            36.0 + crate::widgets::text_width(ui, &label, &label_font) + 24.0 + crate::widgets::text_width(ui, tl!(&h.detail), &detail_font) + 10.0
+        })
+        .fold(0.0, f32::max)
+        .ceil()
+        .clamp(360.0, 560.0)
+}
+
 /// Draw the command palette and dispatch the chosen command or tool group.
 pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     let palette_rect_id = egui::Id::unique("palette_rect");
@@ -154,7 +168,11 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
         .fixed_pos(egui::pos2(screen.center().x, screen.top() + 96.0))
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
-                ui.set_width(560.0);
+                // As wide as the widest entry listed needs (label, a gap, its detail), easing
+                // between widths as the list changes.
+                let target = palette_width(&hits, ui);
+                let width = ui.ctx().animate_value_with_time(egui::Id::new("pedeep-palette-width"), target, 0.12);
+                ui.set_width(width);
                 ui.horizontal(|ui| {
                     ui.add(icons::image("search", 18.0, t.text_muted));
                     let r = ui

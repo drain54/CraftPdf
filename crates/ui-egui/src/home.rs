@@ -94,7 +94,7 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         ui.horizontal(|ui| {
                             widgets::artcraft_mark(ui, 28.0);
                             ui.vertical(|ui| {
-                                ui.label(egui::RichText::new("CraftPdf, based on PdfCraft by the ArtCraft team").font(theme::semibold(15.0)));
+                                ui.label(egui::RichText::new("PeDeEp, based on PdfCraft by the ArtCraft team").font(theme::semibold(15.0)));
                                 ui.label(egui::RichText::new(tl!("Get help, share feedback and follow development on Discord.")).color(t.text_muted));
                             });
                             // Closed for this run only: the card is back on the next launch.

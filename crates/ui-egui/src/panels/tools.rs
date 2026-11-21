@@ -253,7 +253,9 @@ fn tool_detail(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, g: &'static
     egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(list_h).show(ui, |ui| {
         clear_of_scrollbar(ui);
         ui.add_space(2.0);
-        for s in g.sections {
+        // E-Sign: no Fill tools, only signatures.
+        let sections = if g.id == "fill_sign" { &[][..] } else { g.sections };
+        for s in sections {
             widgets::section_title(ui, tl!(s.title));
             for item in s.items {
                 if g.id == "fill_sign" && (item.command.starts_with("sign.fill.signature") || item.command.starts_with("sign.fill.initials")) {
@@ -297,8 +299,8 @@ fn tool_detail(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, g: &'static
             }
         }
         if g.id == "fill_sign" {
-            widgets::section_title(ui, tl!("Sign yourself"));
-            if let Some(cmd) = crate::fill_sign::signature_entries(ui, app, t) {
+            widgets::section_title(ui, tl!("Create Signature"));
+            if let Some(cmd) = crate::fill_sign::signature_library(ui, app, t) {
                 run = Some(cmd);
             }
             // Where the signing happens, not only in Preferences, and once: not also in the Sign

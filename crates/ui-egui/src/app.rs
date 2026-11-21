@@ -46,7 +46,7 @@ impl PdfCraftApp {
         let mark = if dirty { " •" } else { "" };
         let titled = |name: Option<String>| {
             name.or_else(|| self.combine_showing().then(|| tl!("Combine files").to_owned()))
-                .map_or_else(|| "PdfCraft".to_owned(), |name| format!("{name}{mark} — PdfCraft"))
+                .map_or_else(|| "PeDeEp".to_owned(), |name| format!("{name}{mark} — PeDeEp"))
         };
         let title = titled(front.and_then(|i| crate::canvas::tab_label(self, i)));
         // The web page's title is what an embedding host reads to tell which file opened, so it
@@ -295,6 +295,9 @@ impl PdfCraftApp {
             last_copied_image: None,
             last_copied_file: None,
             external_edits: Default::default(),
+            rail_hidden: false,
+            signatures: Vec::new(),
+            signature_list_previews: Vec::new(),
             system_clipboard: true,
             html_clipboard_override: None,
             #[cfg(not(target_arch = "wasm32"))]

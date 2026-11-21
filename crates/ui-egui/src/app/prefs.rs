@@ -155,6 +155,8 @@ impl PdfCraftApp {
             "signature_text": match &self.signature { Some(fill_sign::SavedSig::Typed(t)) => Some(t), _ => None },
             "signature_image": match &self.signature { Some(s @ fill_sign::SavedSig::Image(_)) => Some(s), _ => None },
             "initials": self.initials,
+            // E-Sign's saved signatures, last used first.
+            "signatures": &self.signatures,
             "sign_graphic": self.sign_graphic,
             // macOS Keychain and Windows store identities are read from their OS key stores each time.
             "digital_ids": self.digital_ids.iter().filter(|e| !e.path.starts_with("keychain:") && !e.path.starts_with("windows:")).collect::<Vec<_>>(),
@@ -567,6 +569,20 @@ impl PdfCraftApp {
         }
         if let Ok(s @ fill_sign::SavedSig::Image(_)) = serde_json::from_value::<fill_sign::SavedSig>(v["signature_image"].clone()) {
             self.signature = Some(s);
+        }
+        if let Ok(list) = serde_json::from_value::<Vec<fill_sign::SavedSig>>(v["signatures"].clone()) {
+            self.signatures = list;
+            self.signatures.truncate(fill_sign::MAX_SIGNATURES);
+        }
+        // The signature in use is the one used last: the list's first, or an older single one.
+        if let Some(sig) = self.signature.clone()
+            && !self.signatures.contains(&sig)
+        {
+            self.signatures.insert(0, sig);
+            self.signatures.truncate(fill_sign::MAX_SIGNATURES);
+        }
+        if let Some(first) = self.signatures.first() {
+            self.signature = Some(first.clone());
         }
         if let Ok(i) = serde_json::from_value::<fill_sign::SavedSig>(v["initials"].clone()) {
             self.initials = Some(i);

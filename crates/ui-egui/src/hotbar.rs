@@ -340,7 +340,7 @@ fn core_tool_buttons(ui: &mut egui::Ui, app: &mut PdfCraftApp, cell: f32, popup_
             }
         }
         ui.separator();
-        if let Some(command) = crate::fill_sign::signature_entries(ui, app, t) {
+        if let Some(command) = crate::fill_sign::signature_library(ui, app, t) {
             app.execute(command);
             ui.close();
         }
@@ -611,6 +611,8 @@ fn size_slider_adjusting(slider: &egui::Response, key_pressed: bool, keyboard: &
 }
 
 /// Draw the unified floating or side-docked toolbar, combining quick actions, core tools, and custom shortcuts.
+/// The floating hotbar. PeDeEp draws the hotbar in the navigation rail ([`rail_section`]) instead.
+#[allow(dead_code)]
 pub(crate) fn show(app: &mut PdfCraftApp, area: Rect, page_left: Option<f32>, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let mut bar = std::mem::take(&mut app.hotbar);
@@ -778,17 +780,39 @@ pub(crate) fn show(app: &mut PdfCraftApp, area: Rect, page_left: Option<f32>, ui
             }
         }
     });
+    picker(&ctx, &t, &mut bar, shown.response.rect, was_picker_open, picker_open, settings_clicked, false);
+    ctx.data_mut(|data| {
+        data.insert_temp(id, shown.response.rect.size());
+        data.insert_temp(egui::Id::unique("custom-hotbar"), shown.response.rect.size());
+    });
+    app.hotbar = bar;
+    if let Some(id) = run {
+        app.execute(id);
+    }
+}
+
+/// The Hotbar tools window, beside `bar_rect` (the bar or its section of the navigation rail).
+#[allow(clippy::too_many_arguments)]
+fn picker(
+    ctx: &egui::Context,
+    t: &Tokens,
+    bar: &mut Hotbar,
+    bar_rect: Rect,
+    was_picker_open: bool,
+    mut picker_open: bool,
+    settings_clicked: bool,
+    in_rail: bool,
+) {
     let picker_id = egui::Id::unique("hotbar-picker");
     // A remembered collapsed state can survive disabling the collapse affordance.
-    let mut expanded = egui::collapsing_header::CollapsingState::load_with_default_open(&ctx, picker_id.with("collapsing"), true);
+    let mut expanded = egui::collapsing_header::CollapsingState::load_with_default_open(ctx, picker_id.with("collapsing"), true);
     expanded.set_open(true);
-    expanded.store(&ctx);
+    expanded.store(ctx);
     let screen = ctx.content_rect().shrink(12.0);
     let margin_x = 14.0;
     let card_margin_total = margin_x * 2.0;
     let card_width = 280.0f32.min((screen.width() - card_margin_total).max(180.0));
     let outer_width = card_width + card_margin_total;
-    let bar_rect = shown.response.rect;
     let picker_x =
         if bar_rect.right() + outer_width + 10.0 < screen.right() { bar_rect.right() + 14.0 } else { bar_rect.left() - outer_width - 14.0 };
     let picker_y = if bar.dock.as_deref() == Some("top") {
@@ -820,7 +844,7 @@ pub(crate) fn show(app: &mut PdfCraftApp, area: Rect, page_left: Option<f32>, ui
                 .shadow(egui::Shadow { offset: [0, 6], blur: 20, spread: 0, color: Color32::from_black_alpha(if t.dark() { 120 } else { 35 }) })
                 .inner_margin(egui::Margin::symmetric(14, 12)),
         )
-        .show(&ctx, |ui| {
+        .show(ctx, |ui| {
             ui.set_width(card_width);
 
             // Title bar: "Hotbar Tools" on the left, "X" close button on the right
@@ -835,54 +859,55 @@ pub(crate) fn show(app: &mut PdfCraftApp, area: Rect, page_left: Option<f32>, ui
 
             ui.add_space(10.0);
 
-            // Section 1: Layout & Sizing
-            ui.label(egui::RichText::new(tl!("Layout & Sizing")).size(13.0).strong().color(t.text));
-            ui.add_space(6.0);
+            // Section 1: Layout & Sizing (not in the rail, which sets them itself)
+            if !in_rail {
+                ui.label(egui::RichText::new(tl!("Layout & Sizing")).size(13.0).strong().color(t.text));
+                ui.add_space(6.0);
 
-            // Toolbar size slider row
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(tl!("Toolbar size")).size(12.5).color(t.text));
-                let slider_width = (ui.available_width() - 55.0).clamp(50.0, 140.0);
-                ui.spacing_mut().slider_width = slider_width;
-                let key_pressed = size_slider_key_pressed(ui);
-                let slider = ui.add(egui::Slider::new(&mut bar.button_size, 24.0..=64.0).show_value(false));
-                sizing = size_slider_adjusting(&slider, key_pressed, &mut bar.keyboard_sizing);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("{:.0} px", bar.button_size)).size(12.0).color(t.text_muted));
+                // Toolbar size slider row
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tl!("Toolbar size")).size(12.5).color(t.text));
+                    let slider_width = (ui.available_width() - 55.0).clamp(50.0, 140.0);
+                    ui.spacing_mut().slider_width = slider_width;
+                    let key_pressed = size_slider_key_pressed(ui);
+                    let slider = ui.add(egui::Slider::new(&mut bar.button_size, 24.0..=64.0).show_value(false));
+                    sizing = size_slider_adjusting(&slider, key_pressed, &mut bar.keyboard_sizing);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(egui::RichText::new(format!("{:.0} px", bar.button_size)).size(12.0).color(t.text_muted));
+                    });
                 });
-            });
 
-            ui.add_space(8.0);
+                ui.add_space(8.0);
 
-            // Vertical layout toggle switch row
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(bar.dock.is_none(), |ui| {
-                    let label = tl!("Vertical layout");
-                    toggle_switch(ui, &mut bar.vertical, label, &t);
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new(label).size(12.5).color(t.text));
+                // Vertical layout toggle switch row
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(bar.dock.is_none(), |ui| {
+                        let label = tl!("Vertical layout");
+                        toggle_switch(ui, &mut bar.vertical, label, t);
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new(label).size(12.5).color(t.text));
+                    });
                 });
-            });
 
-            ui.add_space(10.0);
+                ui.add_space(10.0);
 
-            // Stick to a side section with segmented control
-            ui.label(egui::RichText::new(tl!("Stick to a side:")).size(12.5).color(t.text));
-            ui.add_space(6.0);
-            segmented_dock_picker(ui, &mut bar, &t);
+                // Stick to a side section with segmented control
+                ui.label(egui::RichText::new(tl!("Stick to a side:")).size(12.5).color(t.text));
+                ui.add_space(6.0);
+                segmented_dock_picker(ui, bar, t);
 
-            ui.add_space(8.0);
+                ui.add_space(8.0);
 
-            // Full-side strip checkbox
-            let strip_hint = tl!("Extend the docked toolbar along the entire side. Choose a side above to enable.");
-            ui.add_enabled(bar.dock.is_some(), crate::widgets::checkbox(&mut bar.full_side, tl!("Full-side strip")))
-                .on_hover_text(strip_hint)
-                .on_disabled_hover_text(strip_hint);
+                // Full-side strip checkbox
+                let strip_hint = tl!("Extend the docked toolbar along the entire side. Choose a side above to enable.");
+                ui.add_enabled(bar.dock.is_some(), crate::widgets::checkbox(&mut bar.full_side, tl!("Full-side strip")))
+                    .on_hover_text(strip_hint)
+                    .on_disabled_hover_text(strip_hint);
 
-            ui.add_space(12.0);
-            ui.separator();
-            ui.add_space(10.0);
-
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(10.0);
+            }
             // Section 2: Add Tools to Hotbar
             ui.label(egui::RichText::new(tl!("Add Tools to Hotbar")).size(13.0).strong().color(t.text));
             ui.add_space(8.0);
@@ -943,12 +968,44 @@ pub(crate) fn show(app: &mut PdfCraftApp, area: Rect, page_left: Option<f32>, ui
         bar.keyboard_sizing = false;
     }
     bar.picker_drag_pos = (picker_open && sizing).then_some(picker_pos);
-    ctx.data_mut(|data| {
-        data.insert_temp(id, shown.response.rect.size());
-        data.insert_temp(egui::Id::unique("custom-hotbar"), shown.response.rect.size());
-    });
     bar.picker_open = picker_open;
     bar.picker_shown = picker_open.then(|| ctx.cumulative_pass_nr());
+}
+
+/// The hotbar inside the navigation rail: its tools in a column (scrolling when the window is
+/// short) with the settings button at the foot. `ui` lays out bottom up. `rail_on_right` says
+/// which way the tool flyouts open.
+pub(crate) fn rail_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, rail_on_right: bool) {
+    let ctx = ui.ctx().clone();
+    let t = Tokens::get(&ctx);
+    let mut bar = std::mem::take(&mut app.hotbar);
+    bar.normalize();
+    let cell = 32.0;
+    let popup_align = if rail_on_right { egui::RectAlign::LEFT_START } else { egui::RectAlign::RIGHT_START };
+    let mut run = None;
+    let mut remove = None;
+    let was_picker_open = bar.picker_open;
+    let mut picker_open = bar.picker_open;
+    let mut settings_clicked = false;
+    let section = ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+        settings_clicked |= settings_button(ui, cell, &mut picker_open);
+        let room = ui.available_height().max(cell);
+        egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                core_tool_buttons(ui, app, cell, popup_align, &t);
+                active_tool_controls(ui, app, &t, true);
+                if !bar.tools.is_empty() {
+                    ui.separator();
+                    tool_buttons(ui, app, &bar.tools, cell, &mut run, &mut remove);
+                }
+            });
+        });
+    });
+    if let Some(index) = remove {
+        bar.tools.remove(index);
+    }
+    picker(&ctx, &t, &mut bar, section.response.rect, was_picker_open, picker_open, settings_clicked, true);
     app.hotbar = bar;
     if let Some(id) = run {
         app.execute(id);

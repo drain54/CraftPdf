@@ -399,7 +399,103 @@ pub(crate) fn script_preview(text: &str, w: usize, h: usize) -> egui::ColorImage
     img
 }
 
+/// How many signatures E-Sign keeps; past it, the one used least recently goes.
+pub(crate) const MAX_SIGNATURES: usize = 20;
+
+/// Put the signature in use at the top of the saved list (last used first), keeping at most
+/// [`MAX_SIGNATURES`].
+pub(crate) fn remember_signature(app: &mut crate::PdfCraftApp) {
+    let Some(sig) = app.signature.clone() else { return };
+    app.signatures.retain(|s| *s != sig);
+    app.signatures.insert(0, sig);
+    app.signatures.truncate(MAX_SIGNATURES);
+}
+
+/// E-Sign's signatures, as WPS shows them: Create Signature, then the saved ones (last used
+/// first) in a list that shows three and scrolls for the rest. A click places one.
+pub(crate) fn signature_library(ui: &mut egui::Ui, app: &mut crate::PdfCraftApp, t: &Tokens) -> Option<&'static str> {
+    ui.set_width(ui.available_width().clamp(200.0, 248.0));
+    // A signature made in the dialog (or restored from settings) joins the list.
+    if app.signature.as_ref().is_some_and(|s| !app.signatures.contains(s)) {
+        remember_signature(app);
+    }
+    if crate::widgets::ghost_button(ui, "plus", tl!("Create Signature")).clicked() {
+        app.signature_draft = SigDraft::new(false, &app.comment_prefs.author);
+        app.dialog = Some(crate::Dialog::Signature);
+    }
+    ui.add_space(4.0);
+    if app.signatures.is_empty() {
+        ui.label(egui::RichText::new(tl!("No saved signatures yet")).color(t.text_muted));
+        return None;
+    }
+    app.signature_list_previews.resize_with(app.signatures.len(), || None);
+    let placing = app.quick_tool == crate::QuickTool::Fill(FillTool::Signature);
+    let (mut pick, mut remove) = (None, None);
+    let row_h = 52.0;
+    let signatures = &app.signatures;
+    let previews = &mut app.signature_list_previews;
+    let current = app.signature.as_ref();
+    egui::ScrollArea::vertical().id_salt("pedeep-signature-library").max_height(3.0 * (row_h + 4.0)).auto_shrink([false, true]).show(ui, |ui| {
+        for (i, sig) in signatures.iter().enumerate() {
+            let on = placing && current == Some(sig);
+            ui.horizontal(|ui| {
+                let (rect, response) = ui.allocate_exact_size(vec2((ui.available_width() - 34.0).max(120.0), row_h), Sense::click());
+                let use_label = tl!("Place this signature");
+                response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, use_label));
+                let painter = ui.painter_at(rect);
+                painter.rect_filled(rect, CornerRadius::same(4), Color32::WHITE);
+                painter.rect_stroke(
+                    rect,
+                    CornerRadius::same(4),
+                    Stroke::new(if on { 2.0 } else { 1.0 }, if on || response.hovered() { t.accent } else { t.border }),
+                    egui::StrokeKind::Inside,
+                );
+                if let Some(preview) = previews.get_mut(i) {
+                    paint_saved(ui, rect.shrink(8.0), sig, preview, &format!("saved-signature-{i}"));
+                }
+                if crate::theme::hand(response).on_hover_text(use_label).clicked() {
+                    pick = Some(i);
+                }
+                if crate::icons::button(ui, "x", 26.0, false, tl!("Remove this signature")).clicked() {
+                    remove = Some(i);
+                }
+            });
+            ui.add_space(4.0);
+        }
+    });
+    if app.signatures.len() > 3 {
+        ui.label(
+            egui::RichText::new(crate::i18n::fmt(
+                tl!("{n} of {max} saved · scroll for more"),
+                &[("n", &app.signatures.len().to_string()), ("max", &MAX_SIGNATURES.to_string())],
+            ))
+            .font(crate::theme::regular(11.0))
+            .color(t.text_faint),
+        );
+    }
+    if let Some(i) = remove {
+        let gone = app.signatures.remove(i);
+        if i < app.signature_list_previews.len() {
+            app.signature_list_previews.remove(i);
+        }
+        if app.signature.as_ref() == Some(&gone) {
+            app.signature = app.signatures.first().cloned();
+        }
+        return None;
+    }
+    let i = pick?;
+    let sig = app.signatures.remove(i);
+    if i < app.signature_list_previews.len() {
+        let preview = app.signature_list_previews.remove(i);
+        app.signature_list_previews.insert(0, preview);
+    }
+    app.signatures.insert(0, sig.clone());
+    app.signature = Some(sig);
+    Some("sign.fill.signature")
+}
+
 /// Saved previews and add/remove controls, shared by the left panel and quick-tool picker.
+#[allow(dead_code)]
 pub(crate) fn signature_entries(ui: &mut egui::Ui, app: &mut crate::PdfCraftApp, t: &Tokens) -> Option<&'static str> {
     ui.set_width(ui.available_width().clamp(240.0, 248.0));
     let mut command = None;

@@ -97,7 +97,7 @@ pub static TOOL_GROUPS: &[ToolGroup] = &[
     },
     ToolGroup {
         id: "fill_sign",
-        label: "Fill & Sign",
+        label: "E-Sign",
         icon: "pen-line",
         hue: PURPLE,
         badge: None,

@@ -1460,6 +1460,7 @@ fn dialog_signature(ui: &mut egui::Ui, app: &mut PdfCraftApp, req: &mut Pending)
             crate::fill_sign::FillTool::Initials
         } else {
             app.signature = d.saved();
+            crate::fill_sign::remember_signature(app);
             crate::fill_sign::FillTool::Signature
         };
         app.fill_tool = tool;
@@ -1683,7 +1684,7 @@ fn dialog_about(ui: &mut egui::Ui, req: &mut Pending) -> bool {
             ui.horizontal(|ui| {
                 widgets::artcraft_mark(ui, 40.0);
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("PdfCraft").font(theme::semibold(20.0)));
+                    ui.label(egui::RichText::new("PeDeEp").font(theme::semibold(20.0)));
                     ui.label(crate::i18n::fmt(tl!("Version {v}"), &[("v", &pdfcraft_engine::build_info::version())]));
                 });
             });

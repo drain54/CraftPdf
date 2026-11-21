@@ -370,8 +370,10 @@ pub(crate) fn quick_bar_offset(margin: f32, width: f32) -> f32 {
 }
 
 /// The unified quick-action bar and hotbar in the margin or docked to an edge.
+/// PeDeEp: the hotbar is part of the navigation rail (`crate::hotbar::rail_section`), so nothing
+/// floats over the pages.
 pub(super) fn quick_bar(app: &mut PdfCraftApp, area: Rect, page_left: Option<f32>, ui: &mut egui::Ui) {
-    crate::hotbar::show(app, area, page_left, ui);
+    let _ = (app, area, page_left, ui);
 }
 
 #[cfg(test)]

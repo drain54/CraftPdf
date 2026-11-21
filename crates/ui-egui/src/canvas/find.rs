@@ -276,6 +276,13 @@ pub(super) fn find_bar(view: &mut DocView, pages: usize, area: Rect, editing: bo
     if find.in_panel {
         return;
     }
+    // PeDeEp: the mode bar's Find text field is the find field. This bar shows only for Replace
+    // (Edit text mode), with a field of its own id so the two don't share one.
+    let top = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new(crate::chrome::TOP_FIND_KEY))).unwrap_or(false);
+    if top && !(editing && find.replacing) {
+        return;
+    }
+    let input_id = if top { find_input_id(view.pane.key).with("float") } else { find_input_id(view.pane.key) };
     let mut close = false;
     let mut step: Option<bool> = None;
     let mut replace: Option<bool> = None;
@@ -295,7 +302,7 @@ pub(super) fn find_bar(view: &mut DocView, pages: usize, area: Rect, editing: bo
                     ui.horizontal(|ui| {
                         ui.add(icons::image("search", 16.0, t.text_muted));
                         let edit = egui::TextEdit::singleline(&mut find.query)
-                            .id(find_input_id(view.pane.key))
+                            .id(input_id)
                             .hint_text(tl!("Find text"))
                             .desired_width(220.0)
                             .frame(egui::Frame::NONE);
