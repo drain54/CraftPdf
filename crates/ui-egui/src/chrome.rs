@@ -744,7 +744,8 @@ pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 // The cluster's full width (measured when last shown whole) and what folding saves.
                 let nav_w = ui.data(|d| d.get_temp::<f32>(egui::Id::new(NAV_WIDTH_KEY))).unwrap_or(520.0);
                 let nav_min = (nav_w - NAV_FOLD_2).max(200.0);
-                let nav_need = if has_doc { nav_min + 12.0 } else { 0.0 };
+                // The cluster whole comes first: the Find text field shrinks, then goes, before it folds.
+                let nav_need = if has_doc { nav_w + 12.0 } else { 0.0 };
                 // A tab opens its panel; a second click on the tab already open closes the panel.
                 let pick = |app: &mut PdfCraftApp, mode: Mode| {
                     if app.mode == mode && app.left_open {
