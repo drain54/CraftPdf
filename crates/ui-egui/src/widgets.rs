@@ -697,9 +697,22 @@ pub fn artcraft_logo(ui: &mut egui::Ui, height: f32) -> Response {
     ui.label(egui::RichText::new("PeDeEp").strong().size(height * 0.8))
 }
 
-/// Empty room where upstream shows the ArtCraft mark (see [`artcraft_logo`]), `size` points square.
+/// PeDeEp's logo (the maung), `size` points square, where upstream shows the ArtCraft mark.
 pub fn artcraft_mark(ui: &mut egui::Ui, size: f32) -> Response {
-    ui.allocate_response(vec2(size, size), egui::Sense::hover())
+    const LOGO: &[u8] = include_bytes!("../../../assets/app-icon/pedeep-128.png");
+    let id = egui::Id::new("pedeep-logo");
+    let texture = ui.ctx().data(|d| d.get_temp::<egui::TextureHandle>(id)).or_else(|| {
+        let img = craft_image_codecs::decode(LOGO).ok()?;
+        let (w, h) = img.dimensions();
+        let pixels = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &img.to_rgba8());
+        let texture = ui.ctx().load_texture("pedeep-logo", pixels, egui::TextureOptions::LINEAR);
+        ui.ctx().data_mut(|d| d.insert_temp(id, texture.clone()));
+        Some(texture)
+    });
+    match texture {
+        Some(t) => ui.add(egui::Image::new(&t).fit_to_exact_size(vec2(size, size))),
+        None => ui.allocate_response(vec2(size, size), egui::Sense::hover()),
+    }
 }
 
 /// Buttons for every community link (`pdfcraft_engine::links`), Discord first and prominent.
