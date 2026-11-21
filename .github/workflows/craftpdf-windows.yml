@@ -53,6 +53,7 @@ jobs:
           foreach ($f in 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'packaging\windows\portable.txt', 'assets\app-icon\LICENSE-document.txt') {
             Copy-Item $f $stage
           }
+          Copy-Item 'packaging\craftpdf\*.bat' $stage
           # OCR models (Recognize Text) go in models\ beside pdfcraft.exe.
           New-Item -ItemType Directory -Force -Path "$stage\models" | Out-Null
           cargo xtask models "$stage\models"
