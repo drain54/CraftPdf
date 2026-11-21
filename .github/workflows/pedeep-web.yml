@@ -47,6 +47,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: pedeep-web
+          cache-on-failure: true
 
       - name: Trunk
         run: |
@@ -90,6 +91,9 @@ jobs:
           path: dist/web
 
       - name: Publish as the web-latest release
+        # The phone app (GitHub Pages) must not wait on the server release: it got HTTP 403
+        # ("Resource not accessible by integration") on 2026-11-21.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
