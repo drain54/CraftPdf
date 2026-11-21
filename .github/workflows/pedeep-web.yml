@@ -16,9 +16,11 @@ permissions:
   pages: write
   id-token: write
 
+# A running build finishes (the first wasm build takes ~25 min and fills the cache); pushes that
+# land meanwhile wait, and only the newest of them builds next.
 concurrency:
   group: pedeep-web
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   # miniPaint (MIT, https://github.com/viliusle/miniPaint), the editor behind "Edit page in image
