@@ -797,7 +797,6 @@ impl PdfCraftApp {
         }
         self.poll_export();
         self.auto_ocr_scanned_page();
-        self.ocr_edit_prompt();
         self.poll_ocr();
         self.poll_optimize();
         self.poll_scan_clean();

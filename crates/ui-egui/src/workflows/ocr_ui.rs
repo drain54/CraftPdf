@@ -473,14 +473,9 @@ impl PdfCraftApp {
     /// Without an engine the page waits for one (see [`Self::await_ocr_models`]).
     pub(crate) fn auto_ocr_scanned_page(&mut self) {
         let Some(scan) = self.scan_to_read() else { return };
-        // PeDeEp: ask first, once per document, whether to edit the scan with OCR.
-        match self.ocr_edit_choice.get(&scan.doc) {
-            Some(true) => {}
-            Some(false) => return,
-            None => {
-                self.ocr_edit_ask = Some(scan.doc);
-                return;
-            }
+        // PeDeEp: a scan is edited without OCR unless Edit with OCR was chosen for it.
+        if self.ocr_edit_choice.get(&scan.doc) != Some(&true) {
+            return;
         }
         // the engine this run will use, not always the built-in one
         let mut settings = self.ocr_draft.settings();
@@ -531,6 +526,17 @@ impl PdfCraftApp {
             self.ocr_edit_choice.insert(doc, yes);
             self.ocr_edit_ask = None;
         }
+    }
+
+    /// Edit with OCR (the Edit panel and the page's right-click menu): the scanned pages of the
+    /// active document are read as they come into view in Edit, so their words open as text.
+    pub(crate) fn edit_with_ocr(&mut self) {
+        let Some((_, id)) = self.active_ids() else { return };
+        self.ocr_edit_choice.insert(id, true);
+        if self.mode != crate::Mode::Edit {
+            self.select_mode(crate::Mode::Edit);
+        }
+        self.notify_tr("Edit with OCR: scanned pages become editable text as you view them");
     }
 
     /// Edit found a scan but no engine can read it. The page is set aside until one can (rather

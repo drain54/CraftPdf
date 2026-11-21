@@ -710,9 +710,9 @@ fn tab(ui: &mut egui::Ui, spec: TabSpec<'_>, close: &mut Option<usize>) -> egui:
 
 /// Width the buttons at the right of the mode bar and their gaps take: info, undo, redo, save,
 /// print and the rail toggle, the 4 pt `item_spacing` after each, and the 8 pt spacer.
-const MODE_BAR_RIGHT: f32 = 8.0 * 32.0 + 8.0 * 4.0 + 8.0;
-/// Narrowest search field the mode bar shows; below it the field becomes an icon button.
-const MODE_BAR_SEARCH_MIN: f32 = 140.0;
+const MODE_BAR_RIGHT: f32 = 8.0 * 32.0 + 8.0 * 1.0 + 4.0;
+/// Narrowest Find text field the mode bar shows; below it the field is left out.
+const MODE_BAR_FIND_MIN: f32 = 110.0;
 /// Where the page navigation cluster's measured width is kept between frames.
 const NAV_WIDTH_KEY: &str = "pedeep-nav-cluster-width";
 /// Whether the mode bar drew the Find text field this frame (the canvas then hides its own).
@@ -745,10 +745,7 @@ pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 let modes = [(Mode::AllTools, "All tools"), (Mode::Edit, "Edit"), (Mode::Convert, "Convert"), (Mode::Sign, "E-Sign")];
                 let has_doc = app.active.is_some();
                 let nav_w = ui.data(|d| d.get_temp::<f32>(egui::Id::new(NAV_WIDTH_KEY))).unwrap_or(440.0);
-                let nav_need = if has_doc { nav_w + 16.0 } else { 0.0 };
-                let avail = ui.available_width();
-                let tabs_w: f32 = modes.iter().map(|(_, l)| widgets::mode_tab_width(ui, tl!(*l))).sum::<f32>() + 2.0 * (modes.len() as f32 - 1.0);
-                let inline_tabs = avail >= tabs_w + MODE_BAR_RIGHT + MODE_BAR_SEARCH_MIN + nav_need;
+                let nav_need = if has_doc { nav_w + 12.0 } else { 0.0 };
                 // A tab opens its panel; a second click on the tab already open closes the panel.
                 let pick = |app: &mut PdfCraftApp, mode: Mode| {
                     if app.mode == mode && app.left_open {
@@ -758,42 +755,15 @@ pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         app.left_open = true;
                     }
                 };
-                if inline_tabs {
-                    for (mode, label) in modes {
-                        if widgets::mode_tab(ui, tl!(label), app.mode == mode).clicked() {
-                            pick(app, mode);
-                        }
-                    }
-                } else {
-                    // Narrow window: the modes fold into one menu named after the current one.
-                    let current = if app.mode == Mode::Read {
-                        tl!("Read")
-                    } else {
-                        tl!(modes.iter().find(|(m, _)| *m == app.mode).map_or("All tools", |(_, l)| *l))
-                    };
-                    let resp = widgets::ghost_button(ui, "chevron-down", current);
-                    let mut chosen = None;
-                    egui::Popup::menu(&resp).show(|ui| {
-                        ui.set_min_width(160.0);
-                        for (mode, label) in modes {
-                            if ui.add(egui::Button::selectable(app.mode == mode, tl!(label))).clicked() {
-                                chosen = Some(mode);
-                            }
-                        }
-                    });
-                    if let Some(mode) = chosen {
+                // The four tabs always side by side (no folding into a menu).
+                for (mode, label) in modes {
+                    if widgets::mode_tab(ui, tl!(label), app.mode == mode).clicked() {
                         pick(app, mode);
                     }
                 }
                 let left = ui.available_width();
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    // Show or hide the navigation rail; it stays reachable from here when hidden.
-                    let on_right = app.side_panels.rail_on_right();
-                    let tip = if app.rail_hidden { tl!("Show navigation rail") } else { tl!("Hide navigation rail") };
-                    if icons::button(ui, if on_right { "panel-right" } else { "panel-left" }, 32.0, !app.rail_hidden, tip).clicked() {
-                        app.rail_hidden = !app.rail_hidden;
-                    }
+                    ui.spacing_mut().item_spacing.x = 1.0;
                     ui.add_enabled_ui(has_doc, |ui| {
                         let tip = crate::commands::command_tip(ui.ctx(), tl!("Print ({key})"), "print.dialog");
                         // A document that forbids printing says so here, before the dialog (#2669).
@@ -825,20 +795,34 @@ pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         {
                             app.edit_page_externally(page);
                         }
+                        // Edit page: into Edit (text & images), or out of it again.
+                        let editing = app.mode == Mode::Edit;
+                        let tip = if editing { tl!("Stop editing the page (Esc)") } else { tl!("Edit page") };
+                        if icons::button(ui, "file-pen-line", 32.0, editing, tip).clicked() {
+                            if editing {
+                                if matches!(app.quick_tool, crate::QuickTool::EditText | crate::QuickTool::AddText) {
+                                    app.put_down_edit_text();
+                                }
+                                app.switch_mode(Mode::AllTools, true);
+                            } else {
+                                app.switch_mode(Mode::Edit, true);
+                                app.left_open = true;
+                            }
+                        }
                         let tip = crate::commands::command_tip(ui.ctx(), tl!("Document properties ({key})"), "file.properties");
                         if icons::button(ui, "info", 32.0, false, &tip).clicked() {
                             app.dialog = Some(Dialog::Properties(PropsTab::Description));
                         }
                     });
-                    ui.add_space(8.0);
+                    ui.add_space(4.0);
                     let search_w = (left - MODE_BAR_RIGHT - nav_need).clamp(0.0, 420.0);
                     // Find tools and commands: a button. Find text: a field, when there is room.
                     let tip = crate::commands::command_tip(ui.ctx(), tl!("Find tools and commands ({key})"), "view.palette");
                     if icons::button(ui, "search", 32.0, false, &tip).clicked() {
                         app.palette_open = true;
                     }
-                    let find_w = (search_w - 36.0).min(210.0);
-                    if find_w >= MODE_BAR_SEARCH_MIN {
+                    let find_w = (search_w - 36.0).min(150.0);
+                    if find_w >= MODE_BAR_FIND_MIN {
                         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(TOP_FIND_KEY), true));
                         find_box(app, ui, &t, find_w);
                     }
@@ -957,7 +941,13 @@ fn nav_cluster(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) -> f32 {
     let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
     let start = ui.cursor().left();
     let mut page_display = None;
-    ui.spacing_mut().item_spacing.x = 2.0;
+    ui.spacing_mut().item_spacing.x = 1.0;
+    // Show or hide the navigation rail; it stays reachable here when hidden.
+    let on_right = app.side_panels.rail_on_right();
+    let tip = if app.rail_hidden { tl!("Show navigation rail") } else { tl!("Hide navigation rail") };
+    if icons::button(ui, if on_right { "panel-right" } else { "panel-left" }, 28.0, !app.rail_hidden, tip).clicked() {
+        app.rail_hidden = !app.rail_hidden;
+    }
     // Select and Hand, moved here from the rail.
     crate::hotbar::pointer_tool_buttons(ui, app, 28.0);
     ui.add_space(4.0);

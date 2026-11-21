@@ -925,6 +925,8 @@ pub(crate) enum PageMenuAction {
     AddImage,
     /// Open the page's picture (a scan) in another app (Paint).
     EditPageExternally(usize),
+    /// Edit with OCR: scanned pages become editable text.
+    EditWithOcr,
     DeletePage(usize),
     ExportPdf,
     Find,
@@ -1003,6 +1005,7 @@ pub(crate) fn default_page_context_menu(ui: &mut egui::Ui, page: usize, at: [f64
     pick(ui.add_enabled(perms.can_modify, egui::Button::new(tl!("Add image"))), ui, A::AddImage);
     #[cfg(not(target_arch = "wasm32"))]
     pick(ui.add_enabled(perms.can_modify, egui::Button::new(crate::app::page_editor_label())), ui, A::EditPageExternally(page));
+    pick(ui.add_enabled(perms.can_modify, egui::Button::new(tl!("Edit with OCR"))), ui, A::EditWithOcr);
     pick(ui.add_enabled(perms.can_assemble, egui::Button::new(tl!("Delete page"))), ui, A::DeletePage(page));
     pick(ui.add_enabled(perms.can_copy, egui::Button::new(tl!("Export this PDF"))), ui, A::ExportPdf);
 
@@ -3876,6 +3879,7 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
         Some(PageMenuAction::EditPageExternally(page)) => {
             app.edit_page_externally(page);
         }
+        Some(PageMenuAction::EditWithOcr) => app.edit_with_ocr(),
         Some(PageMenuAction::DeletePage(page)) => {
             app.views[index].pending_edit = Some(pdfcraft_engine::Edit::DeletePages { pages: vec![page] });
         }

@@ -40,8 +40,9 @@ pub struct RedactPrefs {
 impl Default for RedactPrefs {
     fn default() -> Self {
         Self {
-            // PeDeEp: no box colour, white outline and white hover fill.
-            fill: None,
+            // PeDeEp: a white box, white outline and white hover fill, so a redaction blends
+            // into the (white) page.
+            fill: Some([1.0, 1.0, 1.0]),
             use_overlay: false,
             overlay: String::new(),
             use_code: false,
@@ -94,6 +95,7 @@ impl RedactPrefs {
             "outline": self.outline,
             "hover_fill": self.hover_fill,
             "opacity": self.opacity,
+            "pedeep_white": true,
         })
     }
 
@@ -164,6 +166,13 @@ impl RedactPrefs {
         }
         if let Some(o) = v["opacity"].as_f64().filter(|o| (0.0..=1.0).contains(o)) {
             d.opacity = o;
+        }
+        // Settings saved before PeDeEp made white the default take the white look once.
+        if v.get("pedeep_white").is_none() {
+            let white = Self::default();
+            d.fill = white.fill;
+            d.outline = white.outline;
+            d.hover_fill = white.hover_fill;
         }
         Some(d)
     }

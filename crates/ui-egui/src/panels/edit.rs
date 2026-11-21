@@ -45,6 +45,14 @@ pub(super) fn edit_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, g
     ui.add_space(4.0);
     ui.separator();
     ui.add_space(6.0);
+    // PeDeEp: a scan is edited without OCR; this turns it on for the document.
+    if widgets::ghost_button(ui, "scan-text", tl!("Edit with OCR"))
+        .on_hover_text(tl!("Recognize the text of scanned pages so it can be edited as text"))
+        .clicked()
+    {
+        app.edit_with_ocr();
+    }
+    ui.add_space(6.0);
     // Several objects selected: how many, and how to move them. Acrobat's panel has no idle hint.
     let count = app.active_ids().filter(|_| app.quick_tool == crate::QuickTool::EditText).map_or(0, |(i, _)| app.views[i].objects.count());
     if count > 0 {
