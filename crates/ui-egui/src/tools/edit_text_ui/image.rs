@@ -1161,7 +1161,6 @@ pub(crate) fn image_context_menu(
     if item(ui, raster, tl!("Save Image As…")) {
         *action = Some(ImageAction::Save(page, hit));
     }
-    #[cfg(not(target_arch = "wasm32"))]
     if item(ui, raster, crate::app::editor_label()) {
         *action = Some(ImageAction::EditExternally(page, hit));
     }

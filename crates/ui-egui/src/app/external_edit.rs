@@ -1,9 +1,15 @@
-//! Edit a page picture in another app (Paint on Windows). The picture goes to a temporary PNG,
-//! upright as the page shows it, and opens there; every time that app saves the file, the new
-//! version takes the picture's place on the page, one undo step per save, while the app stays
-//! open. `CRAFTPDF_IMAGE_EDITOR` names another program to use instead.
+//! Edit a page picture in another app: Paint on Windows, the page's own image editor on the web.
+//! The picture goes out as a PNG, upright as the page shows it; every time the editor saves it,
+//! the new version takes the picture's place on the page, one undo step per save, while the
+//! editor stays open.
+//!
+//! - Desktop: a temporary PNG opened in Paint (`CRAFTPDF_IMAGE_EDITOR` names another program);
+//!   the file is watched for saves.
+//! - Web: the page that hosts the app provides `window.pedeepImageEditor.open(id, name, png)`
+//!   (PeDeEp's `index.html` opens a paint editor over the app). The editor hands each save back
+//!   through `window.pedeepImageEditorSaved(id, png)` and says it closed through
+//!   `window.pedeepImageEditorClosed(id)`; both are installed here on first use.
 
-#[cfg(not(target_arch = "wasm32"))]
 mod pixels;
 
 use super::*;
@@ -21,31 +27,40 @@ pub(crate) fn page_editor_label() -> &'static str {
 /// Pictures out for editing, and when their files are next looked at.
 #[derive(Default)]
 pub(crate) struct ExternalEdits {
-    #[cfg(not(target_arch = "wasm32"))]
     open: Vec<ExternalEdit>,
     #[cfg(not(target_arch = "wasm32"))]
     next_look: Option<std::time::Instant>,
+    #[cfg(target_arch = "wasm32")]
+    web: Option<web::Bridge>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 type Stamp = (std::time::SystemTime, u64);
 
-#[cfg(not(target_arch = "wasm32"))]
 struct ExternalEdit {
     doc: DocId,
     page: usize,
     index: usize,
-    path: std::path::PathBuf,
     /// Quarter turns clockwise the file was given to show upright; undone on the way back.
     turns: u8,
     /// The whole page went out, rendered at this many pixels per point (`index` unused): what
     /// comes back replaces the page.
     whole_page: Option<f32>,
+    /// The picture's file name (desktop: its full path).
+    #[cfg(not(target_arch = "wasm32"))]
+    path: std::path::PathBuf,
     /// The file's version last put on the page (or written by us).
+    #[cfg(not(target_arch = "wasm32"))]
     seen: Option<Stamp>,
     /// A newer version, taken once it holds still for one more look: the other app may still be
     /// writing it.
+    #[cfg(not(target_arch = "wasm32"))]
     settling: Option<Stamp>,
+    /// The number the web editor knows this picture by.
+    #[cfg(target_arch = "wasm32")]
+    id: u64,
+    #[cfg(target_arch = "wasm32")]
+    name: String,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -96,7 +111,6 @@ fn launch_default(path: &std::path::Path) -> std::io::Result<()> {
 }
 
 /// `rgba` as a PNG with no more channels than it uses.
-#[cfg(not(target_arch = "wasm32"))]
 fn png_of(w: u32, h: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     use craft_image_codecs::{ChannelLayout as L, EncodeOptions, Format, Image};
     let (layout, data) = match pixels::pack(rgba) {
@@ -109,15 +123,28 @@ fn png_of(w: u32, h: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// A file name that is safe on every system and says where the picture came from.
-#[cfg(not(target_arch = "wasm32"))]
-fn file_name(doc: &str, page: usize, index: usize) -> String {
+fn base_name(doc: &str, page: usize, index: usize) -> String {
     let stem = doc.rsplit_once('.').map_or(doc, |(s, _)| s);
     let clean: String = stem.chars().map(|c| if c.is_alphanumeric() || " -_()".contains(c) { c } else { '_' }).take(60).collect();
-    let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 1_000_000);
     if index == usize::MAX {
-        return format!("{} - page {} ({unique}).png", clean.trim(), page + 1);
+        return format!("{} - page {}", clean.trim(), page + 1);
     }
-    format!("{} - page {} picture {} ({unique}).png", clean.trim(), page + 1, index + 1)
+    format!("{} - page {} picture {}", clean.trim(), page + 1, index + 1)
+}
+
+/// A [`base_name`], made unique, as a PNG file name.
+#[cfg(not(target_arch = "wasm32"))]
+fn file_name(base: &str) -> String {
+    let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 1_000_000);
+    format!("{base} ({unique}).png")
+}
+
+/// A picture ready to go out: what the editor gets, and how to put its saves back.
+struct Outgoing {
+    name: String,
+    png: Vec<u8>,
+    turns: u8,
+    whole_page: Option<f32>,
 }
 
 impl PdfCraftApp {
@@ -143,25 +170,14 @@ impl PdfCraftApp {
         }
     }
 
-    /// The whole page, as one picture, in the image editor.
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn edit_whole_page_externally(&mut self, _page: usize) {
-        self.notify_tr("Editing pictures in another app needs the desktop version");
-    }
-
     /// The whole page, as one picture, in the image editor: rendered as shown (comments left
     /// out: they stay on the page), and each save there replaces the page.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn edit_whole_page_externally(&mut self, page: usize) {
         let Some((_, id)) = self.active_ids() else { return };
-        if let Some(open) = self.external_edits.open.iter().find(|e| e.doc == id && e.page == page && e.whole_page.is_some()) {
-            let path = open.path.clone();
-            if let Err(e) = launch(&path) {
-                self.notify_fmt("Couldn't open the image editor: {e}", &[("e", &e.to_string())]);
-            }
+        if self.reopen_external_edit(id, page, None) {
             return;
         }
-        let prepared = (|| -> Result<(std::path::PathBuf, f32), String> {
+        let prepared = (|| -> Result<Outgoing, String> {
             let doc = self.session.get(id).ok_or_else(|| tl!("The document is no longer open").to_string())?;
             if !doc.allows_modification() {
                 return Err(tl!("The document's security settings don't allow this change").to_string());
@@ -184,61 +200,23 @@ impl PdfCraftApp {
                 return Err(e);
             }
             let png = png_of(out.width, out.height, &out.rgba)?;
-            let dir = std::env::temp_dir().join("PeDeEp edits");
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let path = dir.join(file_name(&doc.name, page, usize::MAX));
-            std::fs::write(&path, png).map_err(|e| e.to_string())?;
-            Ok((path, scale))
+            Ok(Outgoing { name: base_name(&doc.name, page, usize::MAX), png, turns: 0, whole_page: Some(scale) })
         })();
-        let (path, scale) = match prepared {
-            Ok(p) => p,
-            Err(e) => {
-                self.notify_fmt("Couldn't edit the page: {e}", &[("e", &e)]);
-                return;
-            }
-        };
-        if let Err(e) = launch(&path) {
-            let _ = std::fs::remove_file(&path);
-            self.notify_fmt("Couldn't open the image editor: {e}", &[("e", &e.to_string())]);
-            return;
-        }
-        let seen = stamp(&path);
-        self.external_edits.open.push(ExternalEdit {
-            doc: id,
-            page,
-            index: usize::MAX,
-            path,
-            turns: 0,
-            whole_page: Some(scale),
-            seen,
-            settling: None,
-        });
-        self.notify_fmt("Each save in the image editor replaces page {p} here", &[("p", &(page + 1).to_string())]);
-        if let Some(ctx) = &self.ctx {
-            ctx.request_repaint_after(LOOK_EVERY);
+        match prepared {
+            Ok(out) => self.send_out(id, page, usize::MAX, out),
+            Err(e) => self.notify_fmt("Couldn't edit the page: {e}", &[("e", &e)]),
         }
     }
 
     /// Edit in Paint: picture `index` on `page` of the active document.
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn edit_page_image_externally(&mut self, _page: usize, _index: usize) {
-        self.notify_tr("Editing pictures in another app needs the desktop version");
-    }
-
-    /// Edit in Paint: picture `index` on `page` of the active document.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn edit_page_image_externally(&mut self, page: usize, index: usize) {
         let Some((view, id)) = self.active_ids() else { return };
-        // Already out for editing: bring its file up again rather than start a second copy.
-        if let Some(open) = self.external_edits.open.iter().find(|e| e.doc == id && e.page == page && e.whole_page.is_none() && e.index == index) {
-            let path = open.path.clone();
-            if let Err(e) = launch(&path) {
-                self.notify_fmt("Couldn't open the image editor: {e}", &[("e", &e.to_string())]);
-            }
+        // Already out for editing: bring it up again rather than start a second copy.
+        if self.reopen_external_edit(id, page, Some(index)) {
             return;
         }
         let view_turn = self.views.get(view).map_or(0, |v| v.rotation % 360);
-        let prepared = (|| -> Result<(std::path::PathBuf, u8), String> {
+        let prepared = (|| -> Result<Outgoing, String> {
             let doc = self.session.get(id).ok_or_else(|| tl!("The document is no longer open").to_string())?;
             if !doc.allows_modification() {
                 return Err(tl!("The document's security settings don't allow this change").to_string());
@@ -252,13 +230,47 @@ impl PdfCraftApp {
             let (w, h, rgba) = doc.page_image_rgba(page, index)?;
             let (w, h, rgba) = pixels::turn_rgba(w, h, &rgba, turns).ok_or_else(|| tl!("The picture's pixels couldn't be read").to_string())?;
             let png = png_of(w, h, &rgba)?;
+            Ok(Outgoing { name: base_name(&doc.name, page, index), png, turns, whole_page: None })
+        })();
+        match prepared {
+            Ok(out) => self.send_out(id, page, index, out),
+            Err(e) => self.notify_fmt("Couldn't edit the picture: {e}", &[("e", &e)]),
+        }
+    }
+
+    /// A picture already out for editing (`index` `None`: the whole page) comes up again; `false`
+    /// when there is none (or it couldn't be brought up and was dropped).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn reopen_external_edit(&mut self, doc: DocId, page: usize, index: Option<usize>) -> bool {
+        let Some(open) = self.external_edits.open.iter().find(|e| e.doc == doc && e.page == page && same_target(e, index)) else {
+            return false;
+        };
+        let path = open.path.clone();
+        if let Err(e) = launch(&path) {
+            self.notify_fmt("Couldn't open the image editor: {e}", &[("e", &e.to_string())]);
+        }
+        true
+    }
+
+    /// The web editor shows one picture at a time and says when it closes: an edit still listed
+    /// is the one on screen, so asking again sends a fresh copy (the page as it is now).
+    #[cfg(target_arch = "wasm32")]
+    fn reopen_external_edit(&mut self, doc: DocId, page: usize, index: Option<usize>) -> bool {
+        self.external_edits.open.retain(|e| !(e.doc == doc && e.page == page && same_target(e, index)));
+        false
+    }
+
+    /// Desktop: write the picture to a temporary PNG, open it in Paint and watch it.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn send_out(&mut self, doc: DocId, page: usize, index: usize, out: Outgoing) {
+        let written = (|| -> Result<std::path::PathBuf, String> {
             let dir = std::env::temp_dir().join("PeDeEp edits");
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let path = dir.join(file_name(&doc.name, page, index));
-            std::fs::write(&path, png).map_err(|e| e.to_string())?;
-            Ok((path, turns))
+            let path = dir.join(file_name(&out.name));
+            std::fs::write(&path, &out.png).map_err(|e| e.to_string())?;
+            Ok(path)
         })();
-        let (path, turns) = match prepared {
+        let path = match written {
             Ok(p) => p,
             Err(e) => {
                 self.notify_fmt("Couldn't edit the picture: {e}", &[("e", &e)]);
@@ -271,16 +283,64 @@ impl PdfCraftApp {
             return;
         }
         let seen = stamp(&path);
-        self.external_edits.open.push(ExternalEdit { doc: id, page, index, path, turns, whole_page: None, seen, settling: None });
-        self.notify_fmt("Each save in the image editor updates page {p} here", &[("p", &(page + 1).to_string())]);
+        let whole = out.whole_page.is_some();
+        self.external_edits.open.push(ExternalEdit { doc, page, index, turns: out.turns, whole_page: out.whole_page, path, seen, settling: None });
+        if whole {
+            self.notify_fmt("Each save in the image editor replaces page {p} here", &[("p", &(page + 1).to_string())]);
+        } else {
+            self.notify_fmt("Each save in the image editor updates page {p} here", &[("p", &(page + 1).to_string())]);
+        }
         if let Some(ctx) = &self.ctx {
             ctx.request_repaint_after(LOOK_EVERY);
         }
     }
 
+    /// Web: hand the picture to the page's image editor.
+    #[cfg(target_arch = "wasm32")]
+    fn send_out(&mut self, doc: DocId, page: usize, index: usize, out: Outgoing) {
+        let Some(ctx) = self.ctx.clone() else { return };
+        let bridge = self.external_edits.web.get_or_insert_with(|| web::Bridge::install(ctx));
+        let id = bridge.next_id();
+        if let Err(e) = web::open(id, &out.name, &out.png) {
+            self.notify_fmt("Couldn't open the image editor: {e}", &[("e", &e)]);
+            return;
+        }
+        self.external_edits.open.push(ExternalEdit { doc, page, index, turns: out.turns, whole_page: out.whole_page, id, name: out.name });
+        self.notify_fmt("Each save in the image editor updates page {p} here", &[("p", &(page + 1).to_string())]);
+    }
+
     /// Every frame: put each newly saved version of a picture out for editing in its place.
     #[cfg(target_arch = "wasm32")]
-    pub(crate) fn poll_external_edits(&mut self) {}
+    pub(crate) fn poll_external_edits(&mut self) {
+        if self.external_edits.web.is_none() {
+            return;
+        }
+        // Edits on documents that have closed are forgotten.
+        let views: Vec<DocId> = self.views.iter().map(|v| v.id).collect();
+        self.external_edits.open.retain(|e| views.contains(&e.doc));
+        // A dialog over the document waits for its answer first; the saves stay queued.
+        if self.modal_open() {
+            return;
+        }
+        let events = self.external_edits.web.as_ref().map(web::Bridge::take).unwrap_or_default();
+        for event in events {
+            match event {
+                web::Event::Closed(id) => self.external_edits.open.retain(|e| e.id != id),
+                web::Event::Saved(id, bytes) => {
+                    let Some(e) = self.external_edits.open.iter().find(|e| e.id == id) else { continue };
+                    let back = Incoming {
+                        doc: e.doc,
+                        page: e.page,
+                        index: e.index,
+                        turns: e.turns,
+                        whole_page: e.whole_page,
+                        name: format!("{}.png", e.name),
+                    };
+                    self.take_external_png(back, &bytes);
+                }
+            }
+        }
+    }
 
     /// Every frame: put each newly saved version of a picture out for editing in its place.
     #[cfg(not(target_arch = "wasm32"))]
@@ -332,9 +392,18 @@ impl PdfCraftApp {
         let Some(version) = e.settling.take() else { return };
         // Taken or refused, this version is dealt with: it isn't tried again.
         e.seen = Some(version);
-        let (doc, page, index, turns, whole, path) = (e.doc, e.page, e.index, e.turns, e.whole_page, e.path.clone());
-        let png = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| {
-            let img = craft_image_codecs::decode(&bytes).map_err(|e| e.to_string())?;
+        let name = e.path.file_name().map_or_else(|| "edited.png".to_owned(), |n| n.to_string_lossy().into_owned());
+        let back = Incoming { doc: e.doc, page: e.page, index: e.index, turns: e.turns, whole_page: e.whole_page, name };
+        match std::fs::read(&e.path) {
+            Ok(bytes) => self.take_external_png(back, &bytes),
+            Err(err) => self.notify_fmt("Couldn't read the edited picture: {e}", &[("e", &err.to_string())]),
+        }
+    }
+
+    /// Put a saved picture (any format the codecs read) back where it came from.
+    fn take_external_png(&mut self, back: Incoming, bytes: &[u8]) {
+        let Incoming { doc, page, index, turns, whole_page, name } = back;
+        let png = craft_image_codecs::decode(bytes).map_err(|e| e.to_string()).and_then(|img| {
             let (w, h) = img.dimensions();
             let (w, h, rgba) =
                 pixels::turn_rgba(w, h, &img.to_rgba8(), (4 - turns) % 4).ok_or_else(|| tl!("The saved picture couldn't be read").to_string())?;
@@ -350,8 +419,7 @@ impl PdfCraftApp {
         let Some(view) = self.views.iter().position(|v| v.id == doc) else { return };
         // The edit goes to the document the picture came from, shown so its change can be seen.
         self.active = Some(view);
-        let name = path.file_name().map_or_else(|| "edited.png".to_owned(), |n| n.to_string_lossy().into_owned());
-        let edit = match whole {
+        let edit = match whole_page {
             // The whole page: a one-page PDF of the picture, at the size the page was shown, in
             // the page's place.
             Some(scale) => {
@@ -373,5 +441,102 @@ impl PdfCraftApp {
         if self.apply_edit(edit) {
             self.notify_fmt("Page {p} updated from the image editor", &[("p", &(page + 1).to_string())]);
         }
+    }
+}
+
+/// Where a saved picture goes back to.
+struct Incoming {
+    doc: DocId,
+    page: usize,
+    index: usize,
+    turns: u8,
+    whole_page: Option<f32>,
+    name: String,
+}
+
+/// `e` is picture `index` (`None`: the whole page).
+fn same_target(e: &ExternalEdit, index: Option<usize>) -> bool {
+    match index {
+        None => e.whole_page.is_some(),
+        Some(i) => e.whole_page.is_none() && e.index == i,
+    }
+}
+
+/// The web page's image editor, reached through two functions on `window` each way.
+#[cfg(target_arch = "wasm32")]
+mod web {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use wasm_bindgen::{JsCast, JsValue, closure::Closure};
+
+    /// What the editor said since the last frame.
+    pub(super) enum Event {
+        Saved(u64, Vec<u8>),
+        Closed(u64),
+    }
+
+    /// The editor's replies, queued for the next frame.
+    pub(super) struct Bridge {
+        inbox: Rc<RefCell<Vec<Event>>>,
+        last_id: u64,
+    }
+
+    /// A save the editor hands back is refused past this size (a 6000 px page is far smaller).
+    const MAX_SAVE_BYTES: u32 = 256 << 20;
+
+    impl Bridge {
+        /// Put `pedeepImageEditorSaved` and `pedeepImageEditorClosed` on `window`.
+        pub(super) fn install(ctx: egui::Context) -> Self {
+            let inbox: Rc<RefCell<Vec<Event>>> = Rc::default();
+            if let Some(window) = web_sys::window() {
+                let (q, c) = (inbox.clone(), ctx.clone());
+                let saved = Closure::<dyn FnMut(f64, js_sys::Uint8Array)>::new(move |id: f64, bytes: js_sys::Uint8Array| {
+                    if bytes.length() > MAX_SAVE_BYTES || !(id.is_finite() && id >= 0.0) {
+                        return;
+                    }
+                    q.borrow_mut().push(Event::Saved(id as u64, bytes.to_vec()));
+                    c.request_repaint();
+                });
+                let (q, c) = (inbox.clone(), ctx);
+                let closed = Closure::<dyn FnMut(f64)>::new(move |id: f64| {
+                    if id.is_finite() && id >= 0.0 {
+                        q.borrow_mut().push(Event::Closed(id as u64));
+                        c.request_repaint();
+                    }
+                });
+                let _ = js_sys::Reflect::set(&window, &JsValue::from_str("pedeepImageEditorSaved"), saved.as_ref());
+                let _ = js_sys::Reflect::set(&window, &JsValue::from_str("pedeepImageEditorClosed"), closed.as_ref());
+                // They live as long as the page.
+                saved.forget();
+                closed.forget();
+            }
+            Self { inbox, last_id: 0 }
+        }
+
+        pub(super) fn next_id(&mut self) -> u64 {
+            self.last_id += 1;
+            self.last_id
+        }
+
+        pub(super) fn take(&self) -> Vec<Event> {
+            std::mem::take(&mut *self.inbox.borrow_mut())
+        }
+    }
+
+    /// `window.pedeepImageEditor.open(id, name, png)`.
+    pub(super) fn open(id: u64, name: &str, png: &[u8]) -> Result<(), String> {
+        let missing = || tl!("This page has no image editor; use the desktop version").to_string();
+        let window = web_sys::window().ok_or_else(missing)?;
+        let editor = js_sys::Reflect::get(&window, &JsValue::from_str("pedeepImageEditor")).map_err(|_| missing())?;
+        if editor.is_undefined() || editor.is_null() {
+            return Err(missing());
+        }
+        let open: js_sys::Function =
+            js_sys::Reflect::get(&editor, &JsValue::from_str("open")).map_err(|_| missing())?.dyn_into().map_err(|_| missing())?;
+        let bytes = js_sys::Uint8Array::from(png);
+        open.call3(&editor, &JsValue::from_f64(id as f64), &JsValue::from_str(name), &bytes.into())
+            .map(drop)
+            .map_err(|e| js_sys::Reflect::get(&e, &JsValue::from_str("message")).ok().and_then(|m| m.as_string()).unwrap_or_else(|| format!("{e:?}")))
     }
 }

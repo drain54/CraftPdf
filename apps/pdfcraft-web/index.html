@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PdfCraft</title>
+    <title>PeDeEp</title>
     <link data-trunk rel="rust" data-wasm-opt="z" />
     <!-- Recognises text off the page's thread (crates/ui-egui/src/workflows/ocr_web.rs). -->
     <link data-trunk rel="rust" href="../pdfcraft-ocr-worker/Cargo.toml" data-type="worker" data-loader-shim data-bindgen-target="web" data-wasm-opt="3" />
@@ -11,9 +11,209 @@
       html, body { margin: 0; height: 100%; overflow: hidden; background: #f1f1f3; }
       canvas { width: 100%; height: 100%; display: block; outline: none; }
       @media (prefers-color-scheme: dark) { html, body { background: #19191c; } }
+
+      /* PeDeEp's image editor: the web stand-in for "Edit page in Paint" (see the script below). */
+      #pedeep-paint { position: fixed; inset: 0; z-index: 10; display: none; flex-direction: column; background: #2b2b30; font: 14px/1.3 system-ui, sans-serif; }
+      #pedeep-paint.open { display: flex; }
+      #pedeep-paint header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #8a011e; color: #fff; flex-wrap: wrap; }
+      #pedeep-paint header .title { flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+      #pedeep-paint header .status { opacity: .9; font-size: 13px; }
+      #pedeep-paint button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,.6); background: transparent; color: #fff; cursor: pointer; }
+      #pedeep-paint button.primary { background: #fff; color: #8a011e; border-color: #fff; font-weight: 600; }
+      #pedeep-paint button:focus-visible { outline: 3px solid #ffd54a; outline-offset: 1px; }
+      #pedeep-paint button:disabled { opacity: .5; cursor: default; }
+      #pedeep-paint iframe { flex: 1; width: 100%; border: 0; background: #fff; }
     </style>
   </head>
   <body>
     <canvas id="pdfcraft"></canvas>
+
+    <div id="pedeep-paint" role="dialog" aria-modal="true" aria-labelledby="pedeep-paint-title">
+      <header>
+        <span class="title" id="pedeep-paint-title"></span>
+        <span class="status" id="pedeep-paint-status" role="status" aria-live="polite"></span>
+        <button type="button" class="primary" id="pedeep-paint-save"></button>
+        <button type="button" id="pedeep-paint-done"></button>
+        <button type="button" id="pedeep-paint-close"></button>
+      </header>
+      <iframe id="pedeep-paint-frame" title="Image editor"></iframe>
+    </div>
+
+    <script>
+      // "Edit page in Paint" for the browser. The app (crates/ui-egui/src/app/external_edit.rs)
+      // calls pedeepImageEditor.open(id, name, png); the picture opens in miniPaint (MIT,
+      // served from paint/), and every save hands the picture back through
+      // pedeepImageEditorSaved(id, png), one undo step in PeDeEp per save. Closing says
+      // pedeepImageEditorClosed(id).
+      (function () {
+        var id_lang = /^(id|ms)\b/i.test(navigator.language || '');
+        var T = id_lang ? {
+          save: 'Simpan ke PDF (Ctrl+S)', done: 'Simpan & tutup', close: 'Tutup',
+          title: 'Edit gambar: ', loading: 'Memuat editor…', saving: 'Menyimpan…', saved: 'Tersimpan ke halaman',
+          unsaved: 'Ada perubahan yang belum disimpan ke PDF. Tutup tanpa menyimpan?',
+          replace: 'Gambar lain masih terbuka dengan perubahan yang belum disimpan. Buang perubahan itu?',
+          failed: 'Editor gambar gagal dimuat: '
+        } : {
+          save: 'Save to PDF (Ctrl+S)', done: 'Save & close', close: 'Close',
+          title: 'Edit picture: ', loading: 'Loading the editor…', saving: 'Saving…', saved: 'Saved to the page',
+          unsaved: 'Some changes are not saved to the PDF yet. Close without saving?',
+          replace: 'Another picture is still open with unsaved changes. Discard them?',
+          failed: 'The image editor could not load: '
+        };
+        var box = document.getElementById('pedeep-paint');
+        var frame = document.getElementById('pedeep-paint-frame');
+        var title = document.getElementById('pedeep-paint-title');
+        var status = document.getElementById('pedeep-paint-status');
+        var btn_save = document.getElementById('pedeep-paint-save');
+        var btn_done = document.getElementById('pedeep-paint-done');
+        var btn_close = document.getElementById('pedeep-paint-close');
+        btn_save.textContent = T.save; btn_done.textContent = T.done; btn_close.textContent = T.close;
+
+        var current = null;   // { id, name }
+        var saved_at = 0;     // the editor's undo position at the last save
+        var ready = null;     // resolves with the editor's window once miniPaint is up
+
+        function editor() {
+          if (ready) return ready;
+          ready = new Promise(function (resolve, reject) {
+            var started = Date.now();
+            frame.addEventListener('load', function () {
+              (function wait() {
+                var w = frame.contentWindow;
+                if (w && w.FileOpen && w.Layers && w.State) { hook(w); resolve(w); return; }
+                if (Date.now() - started > 30000) { reject(new Error('timeout')); return; }
+                setTimeout(wait, 50);
+              })();
+            }, { once: true });
+            frame.src = 'paint/index.html';
+          });
+          ready.catch(function () { ready = null; });
+          return ready;
+        }
+
+        // Ctrl+S inside the editor saves to the PDF instead of downloading a file.
+        function hook(w) {
+          w.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && (e.key || '').toLowerCase() === 's') {
+              e.preventDefault(); e.stopImmediatePropagation(); save(false);
+            }
+          }, true);
+        }
+        document.addEventListener('keydown', function (e) {
+          if (!current) return;
+          if ((e.ctrlKey || e.metaKey) && (e.key || '').toLowerCase() === 's') { e.preventDefault(); e.stopImmediatePropagation(); save(false); }
+        }, true);
+
+        function dirty(w) { return !!(current && w && w.State && w.State.action_history_index !== saved_at); }
+
+        function show(on) {
+          box.classList.toggle('open', on);
+          // The app's canvas keeps no keyboard focus while the editor is up.
+          if (on) { try { frame.focus(); } catch (e) {} }
+          else { var c = document.getElementById('pdfcraft'); if (c) c.focus(); }
+        }
+
+        function data_url(bytes) {
+          return new Promise(function (resolve, reject) {
+            var r = new FileReader();
+            r.onload = function () { resolve(r.result); };
+            r.onerror = function () { reject(r.error); };
+            r.readAsDataURL(new Blob([bytes], { type: 'image/png' }));
+          });
+        }
+        function size_of(url) {
+          return new Promise(function (resolve, reject) {
+            var img = new Image();
+            img.onload = function () { resolve({ w: img.naturalWidth, h: img.naturalHeight }); };
+            img.onerror = function () { reject(new Error('image')); };
+            img.src = url;
+          });
+        }
+
+        async function open(id, name, png) {
+          var w0 = ready ? await ready.catch(function () { return null; }) : null;
+          if (current && dirty(w0) && !confirm(T.replace)) return;
+          if (current && current.id !== id) closed(current.id);
+          current = { id: id, name: String(name || 'page') };
+          title.textContent = T.title + current.name;
+          status.textContent = T.loading;
+          btn_save.disabled = btn_done.disabled = true;
+          show(true);
+          try {
+            var w = await editor();
+            var url = await data_url(png);
+            var s = await size_of(url);
+            await w.FileOpen.load_json({
+              info: { width: s.w, height: s.h, version: '4.14.3', layer_active: 1 },
+              layers: [{
+                id: 1, parent_id: 0, name: current.name, type: 'image', link: null, x: 0, y: 0,
+                width: s.w, height: s.h, width_original: s.w, height_original: s.h,
+                visible: true, is_vector: false, hide_selection_if_active: false, opacity: 100, order: 1,
+                composition: 'source-over', rotate: 0, data: null, params: {}, status: null, color: null, filters: []
+              }],
+              data: [{ id: 1, data: url }]
+            });
+            // A scanned page is bigger than the screen: show it whole.
+            var fit = w.document.getElementById('zoom_fit');
+            if (fit && (s.w > w.innerWidth || s.h > w.innerHeight)) fit.click();
+            // What was just loaded is the saved state.
+            saved_at = w.State.action_history_index;
+            status.textContent = '';
+            btn_save.disabled = btn_done.disabled = false;
+          } catch (e) {
+            status.textContent = T.failed + (e && e.message || e);
+          }
+        }
+
+        async function save(and_close) {
+          if (!current || btn_save.disabled) return;
+          var id = current.id;
+          var w = await editor();
+          btn_save.disabled = btn_done.disabled = true;
+          status.textContent = T.saving;
+          try {
+            var dim = w.Layers.get_dimensions();
+            var c = document.createElement('canvas');
+            c.width = dim.width; c.height = dim.height;
+            w.Layers.convert_layers_to_canvas(c.getContext('2d'), null, false);
+            var blob = await new Promise(function (r) { c.toBlob(r, 'image/png'); });
+            var bytes = new Uint8Array(await blob.arrayBuffer());
+            if (typeof window.pedeepImageEditorSaved !== 'function') throw new Error('PeDeEp is not listening');
+            window.pedeepImageEditorSaved(id, bytes);
+            saved_at = w.State.action_history_index;
+            status.textContent = T.saved;
+            setTimeout(function () { if (status.textContent === T.saved) status.textContent = ''; }, 2500);
+            if (and_close) close_editor(true);
+          } catch (e) {
+            status.textContent = T.failed + (e && e.message || e);
+          } finally {
+            btn_save.disabled = btn_done.disabled = false;
+          }
+        }
+
+        function closed(id) {
+          if (typeof window.pedeepImageEditorClosed === 'function') window.pedeepImageEditorClosed(id);
+        }
+
+        async function close_editor(force) {
+          if (!current) { show(false); return; }
+          var w = ready ? await ready.catch(function () { return null; }) : null;
+          if (!force && dirty(w) && !confirm(T.unsaved)) return;
+          closed(current.id);
+          current = null;
+          show(false);
+        }
+
+        btn_save.addEventListener('click', function () { save(false); });
+        btn_done.addEventListener('click', function () { save(true); });
+        btn_close.addEventListener('click', function () { close_editor(false); });
+        // Leaving the page with unsaved edits asks first (the app warns for the PDF itself).
+        window.addEventListener('beforeunload', function (e) {
+          if (current && ready && dirty(frame.contentWindow)) { e.preventDefault(); e.returnValue = ''; }
+        });
+
+        window.pedeepImageEditor = { open: open };
+      })();
+    </script>
   </body>
 </html>

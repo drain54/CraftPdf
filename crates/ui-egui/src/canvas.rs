@@ -1003,7 +1003,6 @@ pub(crate) fn default_page_context_menu(ui: &mut egui::Ui, page: usize, at: [f64
     pick(ui.add_enabled(perms.can_modify, egui::Button::new(egui::RichText::new(tl!("Edit this PDF")).strong())), ui, A::EditPdf);
     pick(ui.add_enabled(perms.can_modify, egui::Button::new(tl!("Add text"))), ui, A::AddText);
     pick(ui.add_enabled(perms.can_modify, egui::Button::new(tl!("Add image"))), ui, A::AddImage);
-    #[cfg(not(target_arch = "wasm32"))]
     pick(ui.add_enabled(perms.can_modify, egui::Button::new(crate::app::page_editor_label())), ui, A::EditPageExternally(page));
     pick(ui.add_enabled(perms.can_modify, egui::Button::new(tl!("Edit with OCR"))), ui, A::EditWithOcr);
     pick(ui.add_enabled(perms.can_assemble, egui::Button::new(tl!("Delete page"))), ui, A::DeletePage(page));

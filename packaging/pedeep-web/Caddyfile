@@ -1,0 +1,12 @@
+# Static PeDeEp site. The front proxy strips the /pdf prefix, so paths start at /.
+:80 {
+	root * /www/current
+	encode zstd gzip
+	header X-Content-Type-Options nosniff
+	# Trunk's hashed app files never change under the same name.
+	@hashed path_regexp ^/[^/]+-[0-9a-f]{16,}(_bg)?\.(wasm|js)$
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+	@pages path / /index.html /paint/ /paint/index.html
+	header @pages Cache-Control "no-cache"
+	file_server
+}

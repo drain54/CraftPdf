@@ -1,0 +1,15 @@
+# PeDeEp in the browser, served by Caddy on the shared Docker network "web".
+# The front proxy forwards /pdf/ here (README.md). Files: ./www/current (filled by update.sh).
+services:
+  pedeep:
+    image: caddy:2-alpine
+    container_name: pedeep
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./www:/www:ro
+    networks: [web]
+
+networks:
+  web:
+    external: true

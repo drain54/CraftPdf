@@ -1,0 +1,87 @@
+name: PeDeEp web build
+
+# Builds the browser version (wasm) with the image editor that stands in for Paint, and publishes
+# it as the "web-latest" release:
+# https://github.com/<owner>/<repo>/releases/download/web-latest/PeDeEp-web.tar.gz
+# Install on a server: packaging/pedeep-web/README.md.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pedeep-web
+  cancel-in-progress: true
+
+env:
+  # miniPaint (MIT, https://github.com/viliusle/miniPaint), the editor behind "Edit page in image
+  # editor" on the web, pinned by commit.
+  MINIPAINT_REV: c9192c15918eb61f7dd89e362cf8065a276b89e9
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PDFCRAFT_BUILD_SHA: ${{ github.sha }}
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pedeep-web
+
+      - name: Trunk
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/trunk-rs/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz | tar xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        working-directory: apps/pdfcraft-web
+        run: trunk build --release
+
+      - name: Image editor and OCR models
+        run: |
+          set -euo pipefail
+          SITE=dist/web
+          git clone --filter=blob:none https://github.com/viliusle/miniPaint /tmp/minipaint
+          git -C /tmp/minipaint checkout --quiet "$MINIPAINT_REV"
+          mkdir -p "$SITE/paint/dist"
+          cp /tmp/minipaint/index.html /tmp/minipaint/MIT-LICENSE.txt "$SITE/paint/"
+          cp /tmp/minipaint/dist/bundle.js /tmp/minipaint/dist/bundle.js.LICENSE.txt "$SITE/paint/dist/"
+          cp -R /tmp/minipaint/images "$SITE/paint/images"
+          mkdir -p "$SITE/models"
+          cargo xtask models "$SITE/models"
+          rm -f "$SITE"/models/*.part
+          cp LICENSE-MIT LICENSE-APACHE NOTICE "$SITE/"
+          echo "${GITHUB_SHA::7}" > "$SITE/VERSION"
+          tar czf dist/PeDeEp-web.tar.gz -C "$SITE" .
+          ls -lh dist/PeDeEp-web.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PeDeEp-web
+          path: dist/PeDeEp-web.tar.gz
+
+      - name: Publish as the web-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete web-latest --yes --cleanup-tag || true
+          gh release create web-latest dist/PeDeEp-web.tar.gz \
+            --target "$GITHUB_SHA" \
+            --latest=false \
+            --title "PeDeEp web (build ${{ github.run_number }})" \
+            --notes "Browser build of ${GITHUB_SHA::7}. Install on a server: packaging/pedeep-web/README.md."
