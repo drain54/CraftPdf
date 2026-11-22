@@ -81,6 +81,23 @@ pub use editing::download_mime_type;
 /// 1440-wide screen at 150 % scaling, the tightest common half-screen split on Windows; the mode
 /// bar, tab strip and notice bars adapt below the old 820 minimum (#1913).
 pub const MIN_WINDOW_SIZE: [f32; 2] = [480.0, 520.0];
+
+/// Logical viewport width below which the shell switches to its compact (phone) layout.
+pub const COMPACT_WIDTH: f32 = 700.0;
+
+/// Minimum touch target size in compact mode (44×44 logical px).
+pub const COMPACT_TOUCH: f32 = 44.0;
+
+/// Returns `true` when the logical viewport width is below [`COMPACT_WIDTH`], computed from the
+/// current frame's content rect so rotation and window resizing take effect immediately.
+pub fn is_compact(ctx: &egui::Context) -> bool {
+    is_compact_width(ctx.content_rect().width())
+}
+
+/// Pure width predicate for [`is_compact`] (`width < 700.0`).
+pub const fn is_compact_width(width: f32) -> bool {
+    width < COMPACT_WIDTH
+}
 pub use editing::{CloseRequest, SaveTarget};
 pub use files::{ExtractDraft, FilePurpose, FileRequest, RotateDraft, SplitDraft, SplitMode, SplitPlan};
 pub use recovery::{AUTOSAVE_SECS, RecoveryMeta, RecoveryStore, default_dictionary_dir};

@@ -471,27 +471,68 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind) {
         v.text_options.color_transfer_function = egui::epaint::FontColorTransferFunction::Gamma(0.75);
     }
     ctx.set_visuals(v);
+    let compact = crate::is_compact(ctx);
     ctx.global_style_mut(|s| {
         // RTL languages mirror stock chrome (menus, combo boxes, scroll bars, headers).
         // Labels still get their paragraph direction explicitly from `bidi::ui_direction`.
         s.right_to_left = rtl;
-        s.spacing.item_spacing = egui::vec2(8.0, 6.0);
-        s.spacing.button_padding = egui::vec2(10.0, 5.0);
         s.spacing.menu_margin = egui::Margin::same(6);
         s.spacing.scroll.bar_width = 8.0;
         s.spacing.scroll.floating = true;
         s.spacing.scroll.floating_width = 3.0;
         s.spacing.scroll.foreground_color = true;
-        s.text_styles.insert(egui::TextStyle::Body, regular(13.0));
-        s.text_styles.insert(egui::TextStyle::Button, regular(13.0));
-        s.text_styles.insert(egui::TextStyle::Small, regular(11.0));
-        s.text_styles.insert(egui::TextStyle::Heading, semibold(17.0));
+        apply_layout_style(s, compact);
         s.interaction.tooltip_delay = 0.35;
     });
     let style = ctx.global_style();
     ctx.set_style_of(egui::Theme::Light, style.clone());
     ctx.set_style_of(egui::Theme::Dark, style);
-    ctx.data_mut(|d| d.insert_temp(direction_key(), rtl));
+    ctx.data_mut(|d| {
+        d.insert_temp(direction_key(), rtl);
+        d.insert_temp(compact_key(), compact);
+    });
+}
+
+/// Return the stable egui id holding the current compact-mode style flag.
+fn compact_key() -> egui::Id {
+    egui::Id::unique("pdfcraft-style-compact")
+}
+
+/// Apply touch-friendly spacing and slightly larger fonts in compact mode, or restore desktop defaults.
+fn apply_layout_style(s: &mut egui::Style, compact: bool) {
+    if compact {
+        s.spacing.interact_size = egui::vec2(crate::COMPACT_TOUCH, crate::COMPACT_TOUCH);
+        s.spacing.button_padding = egui::vec2(14.0, 10.0);
+        s.spacing.item_spacing = egui::vec2(10.0, 8.0);
+        s.text_styles.insert(egui::TextStyle::Body, regular(15.0));
+        s.text_styles.insert(egui::TextStyle::Button, regular(15.0));
+        s.text_styles.insert(egui::TextStyle::Small, regular(12.5));
+        s.text_styles.insert(egui::TextStyle::Heading, semibold(19.0));
+    } else {
+        s.spacing.interact_size = egui::Spacing::default().interact_size;
+        s.spacing.button_padding = egui::vec2(10.0, 5.0);
+        s.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        s.text_styles.insert(egui::TextStyle::Body, regular(13.0));
+        s.text_styles.insert(egui::TextStyle::Button, regular(13.0));
+        s.text_styles.insert(egui::TextStyle::Small, regular(11.0));
+        s.text_styles.insert(egui::TextStyle::Heading, semibold(17.0));
+    }
+}
+
+/// Keep stock egui spacing and font sizes in step with [`crate::is_compact`] across window
+/// resizes and screen rotations without rebuilding visuals every frame.
+pub fn sync_compact(ctx: &egui::Context, compact: bool) {
+    let changed = ctx.data_mut(|d| {
+        if d.get_temp::<bool>(compact_key()) == Some(compact) {
+            false
+        } else {
+            d.insert_temp(compact_key(), compact);
+            true
+        }
+    });
+    if changed {
+        ctx.all_styles_mut(|s| apply_layout_style(s, compact));
+    }
 }
 
 /// Return the stable egui id holding the current right-to-left style flag.

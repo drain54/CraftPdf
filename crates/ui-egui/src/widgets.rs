@@ -214,6 +214,30 @@ pub fn mode_tab_width(ui: &egui::Ui, label: &str) -> f32 {
     ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), theme::semibold(13.5), t.text).size().x) + 22.0
 }
 
+/// A compact bottom-bar mode tab: at least [`crate::COMPACT_TOUCH`] (44 px) tall and wide.
+pub fn compact_mode_tab(ui: &mut egui::Ui, label: &str, active: bool) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let font = if active { theme::semibold(14.5) } else { theme::medium(14.5) };
+    let w = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font.clone(), t.text).size().x);
+    let width = (w + 24.0).max(crate::COMPACT_TOUCH);
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, crate::COMPACT_TOUCH), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), active, label));
+    let press = theme::Press::track(ui, &resp);
+    let well = rect.shrink2(vec2(2.0, 4.0));
+    if active {
+        ui.painter().rect_filled(well, CornerRadius::same(8), t.accent_soft);
+    } else {
+        press.wash(ui, well, 8, false);
+    }
+    let body = rect.translate(press.offset());
+    ui.painter().text(body.center(), Align2::CENTER_CENTER, label, font, if active { t.text } else { t.text_muted });
+    if active {
+        let r = Rect::from_min_max(rect.left_bottom() + vec2(10.0, -2.0), rect.right_bottom() - vec2(10.0, 0.0));
+        ui.painter().rect_filled(r, CornerRadius { nw: 1, ne: 1, sw: 0, se: 0 }, t.accent);
+    }
+    theme::hand(resp)
+}
+
 /// Rounded pill button; `primary` fills with the accent.
 pub fn pill_button(ui: &mut egui::Ui, label: &str, primary: bool) -> Response {
     pill_button_marked(ui, label, primary, false)

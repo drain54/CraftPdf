@@ -7,7 +7,7 @@ use crate::canvas::{DocView, Fit, PageLayout};
 use crate::panes::{Place, TabDrop};
 use crate::tab_context::Action;
 use crate::theme::{self, ThemePreference, Tokens};
-use crate::{Dialog, Mode, PdfCraftApp, PropsTab, RightPanel, icons, widgets, window_controls};
+use crate::{Dialog, LeftPanel, Mode, PdfCraftApp, PropsTab, QuickTool, RightPanel, icons, widgets, window_controls};
 
 /// Height of the tab strip when it doubles as the macOS title bar (#789). AppKit draws the traffic
 /// lights itself, centred in the standard 28 pt title-bar band at the top of the window, and moving
@@ -52,6 +52,9 @@ fn mac_lights_on_right() -> Option<bool> {
 /// Draw the window's tab strip: home and open controls, shrinkable and scrollable document tabs with drag
 /// reordering, and platform window controls.
 pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+    if crate::is_compact(ui.ctx()) {
+        return;
+    }
     let t = Tokens::get(ui.ctx());
     // macOS: the strip is the 28 pt title bar, so the traffic lights are centred in it; tabs and
     // buttons shrink to keep a margin above and below.
@@ -722,6 +725,10 @@ pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     // The document in the active tab may hide the menu or the tools (`crate::viewer_prefs`).
     let hidden = app.hidden_interface();
     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(TOP_FIND_KEY), false));
+    if crate::is_compact(ui.ctx()) {
+        compact_top_bar(app, ui, &t, hidden.menubar, hidden.toolbar);
+        return;
+    }
     egui::Panel::top("mode_bar")
         .exact_size(48.0)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(10, 0)).stroke(Stroke::new(1.0, t.divider)))
@@ -860,6 +867,276 @@ pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     }
                 });
             });
+        });
+}
+
+/// Compact top bar (`< 700 px`): Menu button, ellipsized file name, Save, and a "⋯" menu for
+/// navigation, Find text, Paint/image editor, and the remaining chrome actions.
+fn compact_top_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, hide_menubar: bool, hide_toolbar: bool) {
+    let touch = crate::COMPACT_TOUCH;
+    egui::Panel::top("mode_bar")
+        .exact_size(52.0)
+        .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(8, 0)).stroke(Stroke::new(1.0, t.divider)))
+        .show(ui, |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                if app.native_menu.is_none() && !hide_menubar {
+                    app.menu_bar_compact_ui(ui);
+                }
+                if hide_toolbar {
+                    return;
+                }
+                let has_doc = app.active.is_some();
+                let right_w = 2.0 * touch + 2.0 * ui.spacing().item_spacing.x;
+                let name_w = (ui.available_width() - right_w).max(0.0);
+                let doc_title = app
+                    .active
+                    .and_then(|i| {
+                        let name = crate::canvas::tab_label(app, i)?;
+                        let dirty = app.has_unsaved_work(i);
+                        Some(if dirty { format!("{name} •") } else { name })
+                    })
+                    .or_else(|| app.combine_showing().then(|| tl!("Combine files").to_owned()))
+                    .unwrap_or_else(|| "PeDeEp".to_owned());
+                let font = theme::medium(14.0);
+                let shown = crate::panels::ellipsized_prefix(&doc_title, |s| {
+                    crate::bidi::layout_ltr(ui, s.to_owned(), font.clone(), t.text).size().x <= name_w
+                });
+                let galley = crate::bidi::layout_ltr(ui, shown, font, t.text);
+                let (name_rect, _) = ui.allocate_exact_size(vec2(name_w, touch), Sense::hover());
+                let text_pos = egui::pos2(name_rect.left(), name_rect.center().y - galley.size().y / 2.0);
+                ui.painter().with_clip_rect(name_rect).galley(text_pos, galley, t.text);
+
+                ui.add_enabled_ui(has_doc, |ui| {
+                    let tip = crate::commands::command_tip(ui.ctx(), tl!("Save ({key})"), "file.save");
+                    if icons::button(ui, "save", touch, false, &tip).clicked() {
+                        app.run_command("file.save");
+                    }
+                });
+                let more = icons::button(ui, "ellipsis", touch, false, tl!("More tools"));
+                egui::Popup::menu(&more).show(|ui| {
+                    ui.set_min_width(240.0);
+                    compact_more_menu(app, ui, t);
+                });
+            });
+        });
+}
+
+/// Overflow menu ("⋯") for the compact top bar: page navigation, zoom, display, Find text,
+/// Paint/image editor, Undo/Redo, Print, Properties, Open, Home, and theme/preferences.
+fn compact_more_menu(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
+    let mut page_display: Option<&'static str> = None;
+    let mut run_cmd: Option<&'static str> = None;
+    let mut open_find = false;
+    let mut edit_paint_page: Option<usize> = None;
+    let mut open_props = false;
+
+    if let Some((index, id)) = app.active_ids() {
+        let page_count = app.session.get(id).map_or(0, |d| d.info.pages.len());
+        if let Some(view) = app.views.get_mut(index) {
+            let shown = if view.current < page_count { view.current + 1 } else { page_count };
+            let page_header = crate::i18n::fmt(tl!("Page {p} of {n}"), &[("p", &shown.to_string()), ("n", &page_count.to_string())]);
+            let zoom_pct = format!("{:.0}%", view.zoom * 100.0);
+            ui.label(egui::RichText::new(format!("{page_header} · {zoom_pct}")).color(t.text_faint).small());
+            if ui.button(tl!("Previous page")).clicked() {
+                view.step_page(false);
+                ui.close();
+            }
+            if ui.button(tl!("Next page")).clicked() {
+                view.step_page(true);
+                ui.close();
+            }
+            if ui.add_enabled(!view.back.is_empty(), egui::Button::new(tl!("Previous view"))).clicked() {
+                view.view_history(false);
+                ui.close();
+            }
+            if ui.add_enabled(!view.forward.is_empty(), egui::Button::new(tl!("Next view"))).clicked() {
+                view.view_history(true);
+                ui.close();
+            }
+            ui.separator();
+            if ui.button(tl!("Zoom in")).clicked() {
+                view.zoom_step(true);
+                ui.close();
+            }
+            if ui.button(tl!("Zoom out")).clicked() {
+                view.zoom_step(false);
+                ui.close();
+            }
+            let fit_label = if view.fit == Fit::Width { tl!("Fit page") } else { tl!("Fit width") };
+            if ui.button(fit_label).clicked() {
+                view.fit = if view.fit == Fit::Width { Fit::Page } else { Fit::Width };
+                view.goto = Some((view.current, 0.0));
+                ui.close();
+            }
+            if ui.button(tl!("Rotate view clockwise")).clicked() {
+                view.rotate_view(true);
+                ui.close();
+            }
+            ui.menu_button(tl!("Page display"), |ui| {
+                ui.set_min_width(220.0);
+                if let Some(cmd) = rail_view_menu(ui, view) {
+                    page_display = Some(cmd);
+                }
+            });
+            ui.separator();
+            if ui.add(egui::Button::selectable(app.quick_tool == QuickTool::Select, tl!("Select"))).clicked() {
+                app.quick_tool = QuickTool::Select;
+                ui.close();
+            }
+            if ui.add(egui::Button::selectable(app.quick_tool == QuickTool::Hand, tl!("Hand"))).clicked() {
+                app.quick_tool = QuickTool::Hand;
+                ui.close();
+            }
+            ui.separator();
+            if ui.button(tl!("Find text")).clicked() {
+                open_find = true;
+                ui.close();
+            }
+            if ui.button(tl!("Find tools and commands")).clicked() {
+                app.palette_open = true;
+                ui.close();
+            }
+            ui.separator();
+            let paint_label = if cfg!(windows) { tl!("Edit page in Paint") } else { tl!("Edit page in image editor") };
+            if ui.button(paint_label).clicked() {
+                edit_paint_page = Some(view.current);
+                ui.close();
+            }
+            if ui.button(tl!("Undo")).clicked() {
+                run_cmd = Some("edit.undo");
+                ui.close();
+            }
+            if ui.button(tl!("Redo")).clicked() {
+                run_cmd = Some("edit.redo");
+                ui.close();
+            }
+            let may_print = pdfcraft_engine::commands::command("print.dialog").is_some_and(|c| app.command_enabled(c));
+            if ui.add_enabled(may_print, egui::Button::new(tl!("Print"))).clicked() {
+                run_cmd = Some("print.dialog");
+                ui.close();
+            }
+            if ui.button(tl!("Document properties")).clicked() {
+                open_props = true;
+                ui.close();
+            }
+            ui.separator();
+        }
+    } else if ui.button(tl!("Find tools and commands")).clicked() {
+        app.palette_open = true;
+        ui.close();
+    }
+
+    if let Some(cmd) = page_display {
+        app.execute(cmd);
+    }
+    if open_find && let Some(view) = app.active.and_then(|i| app.views.get_mut(i)) {
+        view.find.get_or_insert_with(Default::default).focus = true;
+    }
+    if let Some(page) = edit_paint_page {
+        app.edit_page_externally(page);
+    }
+    if let Some(cmd) = run_cmd {
+        app.run_command(cmd);
+    }
+    if open_props {
+        app.dialog = Some(Dialog::Properties(PropsTab::Description));
+    }
+
+    if ui.button(tl!("Open")).clicked() {
+        app.open_dialog();
+        ui.close();
+    }
+    if ui.button(tl!("Home")).clicked() {
+        app.active = None;
+        app.combine_tab.focused = false;
+        ui.close();
+    }
+    if app.views.len() > 1 {
+        ui.menu_button(tl!("Open files"), |ui| {
+            let mut pick = None;
+            for i in 0..app.views.len() {
+                if let Some(name) = crate::canvas::tab_label(app, i)
+                    && ui.add(egui::Button::selectable(app.active == Some(i), name)).clicked()
+                {
+                    pick = Some(i);
+                    ui.close();
+                }
+            }
+            if let Some(i) = pick {
+                app.active = Some(i);
+                app.combine_tab.focused = false;
+            }
+        });
+    }
+    if ui.button(tl!("Preferences")).clicked() {
+        app.execute("app.preferences");
+        ui.close();
+    }
+    let theme_label = match app.theme_preference {
+        ThemePreference::System => tl!("Use system setting"),
+        ThemePreference::Light => tl!("Light gray"),
+        ThemePreference::Dark => tl!("Dark gray"),
+    };
+    if ui.button(format!("{}: {theme_label}", tl!("Display theme"))).clicked() {
+        app.execute(match app.theme_preference {
+            ThemePreference::System => "view.theme.light",
+            ThemePreference::Light => "view.theme.dark",
+            ThemePreference::Dark => "view.theme.system",
+        });
+        ui.close();
+    }
+}
+
+/// Compact bottom bar (`< 700 px`): horizontally scrollable single row of workspace modes and
+/// core tools, each at least [`crate::COMPACT_TOUCH`] (44 px) tall and wide.
+pub fn compact_bottom_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+    let t = Tokens::get(ui.ctx());
+    egui::Panel::bottom("compact_mode_bar")
+        .exact_size(52.0)
+        .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(6, 4)).stroke(Stroke::new(1.0, t.divider)))
+        .show(ui, |ui| {
+            ui.style_mut().always_scroll_the_only_direction = true;
+            egui::ScrollArea::horizontal()
+                .id_salt("compact_mode_scroll")
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    ui.horizontal_centered(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        let organizing =
+                            app.left == LeftPanel::Tool("organize") || app.active.and_then(|i| app.views.get(i)).is_some_and(|v| v.organize);
+                        if widgets::compact_mode_tab(ui, tl!("All tools"), app.mode == Mode::AllTools && app.left == LeftPanel::AllTools).clicked() {
+                            app.switch_mode(Mode::AllTools, true);
+                        }
+                        if widgets::compact_mode_tab(ui, tl!("Edit"), app.mode == Mode::Edit).clicked() {
+                            app.switch_mode(Mode::Edit, true);
+                        }
+                        if widgets::compact_mode_tab(ui, tl!("E-Sign"), app.mode == Mode::Sign).clicked() {
+                            app.switch_mode(Mode::Sign, true);
+                        }
+                        if widgets::compact_mode_tab(ui, tl!("Scan & OCR"), app.left == LeftPanel::Tool("scan")).clicked() {
+                            app.select_tool("scan");
+                        }
+                        if widgets::compact_mode_tab(ui, tl!("Organize pages"), organizing).clicked() {
+                            app.select_tool("organize");
+                        }
+                        if widgets::compact_mode_tab(ui, tl!("Convert"), app.mode == Mode::Convert).clicked() {
+                            app.switch_mode(Mode::Convert, true);
+                        }
+                        if widgets::compact_mode_tab(ui, tl!("Add comments"), app.left == LeftPanel::Tool("comment")).clicked() {
+                            app.select_tool("comment");
+                        }
+                        if widgets::compact_mode_tab(ui, tl!("Compress"), app.left == LeftPanel::Tool("compress")).clicked() {
+                            app.select_tool("compress");
+                        }
+                        if widgets::compact_mode_tab(ui, tl!("Protect"), app.left == LeftPanel::Tool("protect")).clicked() {
+                            app.select_tool("protect");
+                        }
+                        if widgets::compact_mode_tab(ui, tl!("Read mode"), app.mode == Mode::Read).clicked() {
+                            app.switch_mode(Mode::Read, true);
+                        }
+                    });
+                });
         });
 }
 

@@ -32,6 +32,7 @@ mod combine_grid;
 mod commands;
 mod comment_pin;
 mod comments;
+mod compact_mode;
 mod compare;
 mod content;
 mod control;

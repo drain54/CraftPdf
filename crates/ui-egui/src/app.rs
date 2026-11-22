@@ -834,6 +834,8 @@ impl PdfCraftApp {
         i18n::set_current(i18n::Lang::from_pref(&self.language));
         // A language change switches stock chrome between LTR and RTL before anything is drawn.
         theme::sync_direction(&ctx);
+        let compact = is_compact(&ctx);
+        theme::sync_compact(&ctx, compact);
         // Fonts registered via set_fonts only take effect next frame; named families would panic now.
         if !self.fonts_ready {
             ctx.request_repaint();
@@ -921,6 +923,9 @@ impl PdfCraftApp {
         }
         if !hidden.window_ui {
             side_panels::show(self, ui);
+            if compact {
+                chrome::compact_bottom_bar(self, ui);
+            }
         }
         let t = theme::Tokens::get(&ctx);
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.pasteboard)).show(ui, |ui| {

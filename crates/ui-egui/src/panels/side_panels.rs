@@ -417,6 +417,9 @@ fn keep_resize_edges_off_scrollbars(ui: &mut egui::Ui, host: egui::Id, open: &[P
 
 /// Draws the rail and the open panes. Call after the top bars and before the central panel.
 pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+    if crate::is_compact(ui.ctx()) {
+        return;
+    }
     if let Some(panel) = app.right {
         app.last_right = panel;
     }
