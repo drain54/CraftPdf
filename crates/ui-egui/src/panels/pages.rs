@@ -1,25 +1,27 @@
 use super::{Align, Align2, Color32, CornerRadius, DocInfo, Layout, Nav, Rect, Sense, Stroke, Tokens, icons, pos2, theme, vec2};
 
-/// Page tools in the Pages panel's header (#4415): a menu, as Bookmark options is in its panel,
-/// to insert a blank page or pages from a file, rotate, extract and delete. Each runs its
-/// command on the selected pages (the current page when none is), so it does what Pages ▸ …
-/// does; the items say so, apart from the thumbnails' own menu. `enabled` is false while the
+/// Page tools in the Pages panel's header (#4415). Rotate counterclockwise, rotate clockwise and
+/// Delete the selected pages are buttons of their own; the menu (⋯) keeps the rest: insert a
+/// blank page or pages from a file, and extract. Each runs its command on the selected pages (the
+/// current page when none is), so it does what Pages ▸ … does. `enabled` is false while the
 /// document may not be assembled or a dialog is open. Returns the command a click asks for.
 pub(super) fn page_tools(ui: &mut egui::Ui, enabled: bool) -> Option<&'static str> {
-    let tools: [(&'static str, &str); 6] = [
-        ("page.insert_blank", tl!("Insert a blank page after the selection")),
-        ("page.insert", tl!("Insert pages from a file after the selection…")),
+    let direct: [(&'static str, &str); 3] = [
         ("page.rotate_ccw", tl!("Rotate the selected pages counterclockwise")),
         ("page.rotate", tl!("Rotate the selected pages clockwise")),
-        ("page.extract", tl!("Extract the selected pages…")),
         ("page.delete", tl!("Delete the selected pages")),
+    ];
+    let menu: [(&'static str, &str); 3] = [
+        ("page.insert_blank", tl!("Insert a blank page after the selection")),
+        ("page.insert", tl!("Insert pages from a file after the selection…")),
+        ("page.extract", tl!("Extract the selected pages…")),
     ];
     let mut picked = None;
     ui.add_enabled_ui(enabled, |ui| {
         let more = icons::button(ui, "ellipsis", 26.0, false, tl!("Page tools"));
         egui::Popup::menu(&more).show(|ui| {
             ui.set_min_width(260.0);
-            for (id, label) in tools {
+            for (id, label) in menu {
                 let Some(spec) = pdfcraft_engine::commands::command(id) else { continue };
                 let item = egui::Button::image_and_text(icons::image(spec.icon, 16.0, ui.visuals().text_color()), label);
                 if ui.add(item).clicked() {
@@ -28,6 +30,14 @@ pub(super) fn page_tools(ui: &mut egui::Ui, enabled: bool) -> Option<&'static st
                 }
             }
         });
+        // The header lays out right to left: the buttons come after the menu, so they read
+        // Rotate counterclockwise, Rotate clockwise, Delete, ⋯ from the left.
+        for (id, label) in direct.into_iter().rev() {
+            let Some(spec) = pdfcraft_engine::commands::command(id) else { continue };
+            if icons::button(ui, spec.icon, 26.0, false, label).clicked() {
+                picked = Some(id);
+            }
+        }
     });
     picked
 }
@@ -105,12 +115,9 @@ pub(super) fn pages(
     let owns_keyboard = keyboard.has_focus();
     // Escape remains with the panel after the pointer moves away.
     ui.memory_mut(|m| m.set_focus_lock_filter(focus_id, egui::EventFilter { escape: true, ..Default::default() }));
-    // Escape drops the selection while the pointer is over the panel and nothing else wants the key.
-    if !view.selected.is_empty()
-        && (owns_keyboard || !ui.ctx().egui_wants_keyboard_input())
-        && (owns_keyboard || ui.rect_contains_pointer(ui.clip_rect()))
-        && keys.take(ui.ctx(), egui::Key::Escape)
-    {
+    // Escape drops the selection wherever the pointer is (a selected thumbnail otherwise stayed
+    // picked after a click on the page itself) while nothing else wants the key.
+    if !view.selected.is_empty() && (owns_keyboard || !ui.ctx().egui_wants_keyboard_input()) && keys.take(ui.ctx(), egui::Key::Escape) {
         view.clear_page_selection(Some(view.current));
     }
     // Delete (or Backspace) deletes the selection, or the current page, likewise.

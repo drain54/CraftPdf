@@ -396,7 +396,8 @@ impl PdfCraftApp {
             } else if !doc.info.outline.is_empty() && !initial.full_screen {
                 Some(RightPanel::Bookmarks)
             } else {
-                None
+                // Nothing in the document asks for a panel: the page thumbnails open.
+                Some(RightPanel::Pages)
             };
         }
         let view = DocView::new(id, &doc.info, self.view_defaults);

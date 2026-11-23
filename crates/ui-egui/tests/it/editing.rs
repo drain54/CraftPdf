@@ -661,39 +661,40 @@ fn press_after(keys: &[(Modifiers, Key)], activate: Key) -> Harness<'static, Pdf
 #[test]
 fn the_save_prompt_moves_between_buttons_with_the_keyboard() {
     let none = Modifiers::NONE;
-    // Left from Save is Cancel: Enter or Space presses it, so nothing closes and nothing saves.
+    // Right from Save is Cancel: Enter or Space presses it, so nothing closes and nothing saves.
     for activate in [Key::Enter, Key::Space] {
-        let h = press_after(&[(none, Key::ArrowLeft)], activate);
+        let h = press_after(&[(none, Key::ArrowRight)], activate);
         assert_eq!(h.state().views.len(), 1, "{activate:?} on Cancel keeps the document");
         assert!(h.state().close_request.is_none());
         assert!(dirty(&h), "{activate:?} on Cancel doesn't save");
     }
-    // Two left is Don't save, which closes without saving; Shift+Tab walks the same way.
+    // Two right is Don't save, which closes without saving; Tab and Shift+Tab (which wraps from
+    // Save) get there too.
     for keys in [
-        vec![(none, Key::ArrowLeft), (none, Key::ArrowLeft)],
-        vec![(Modifiers::SHIFT, Key::Tab), (Modifiers::SHIFT, Key::Tab)],
-        vec![(none, Key::ArrowLeft), (none, Key::ArrowLeft), (none, Key::ArrowLeft)],
-        vec![(none, Key::Tab)],
+        vec![(none, Key::ArrowRight), (none, Key::ArrowRight)],
+        vec![(none, Key::Tab), (none, Key::Tab)],
+        vec![(none, Key::ArrowRight), (none, Key::ArrowRight), (none, Key::ArrowRight)],
+        vec![(Modifiers::SHIFT, Key::Tab)],
     ] {
         let h = press_after(&keys, Key::Enter);
         assert!(h.state().views.is_empty(), "{keys:?} reaches Don't save, which closes the tab");
     }
-    // Tab from Save wraps to Don't save; arrows stop at the right end, so Save stays chosen.
+    // Arrows stop at the left end, so Left from Save keeps Save chosen.
     let out = temp_path("arrows-stop.pdf");
     let mut h = dirty_prompt();
     h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
-    h.key_press(Key::ArrowRight);
+    h.key_press(Key::ArrowLeft);
     h.run_steps(2);
     h.key_press(Key::Enter);
     h.run_steps(3);
-    assert!(h.state().views.is_empty(), "Right from Save stays on Save, which saves");
+    assert!(h.state().views.is_empty(), "Left from Save stays on Save, which saves");
     assert!(out.exists());
     let _ = std::fs::remove_file(out);
 }
 
 #[test]
 fn the_save_prompt_escape_still_cancels_whatever_is_chosen() {
-    let h = press_after(&[(Modifiers::NONE, Key::ArrowLeft), (Modifiers::NONE, Key::ArrowLeft)], Key::Escape);
+    let h = press_after(&[(Modifiers::NONE, Key::ArrowRight), (Modifiers::NONE, Key::ArrowRight)], Key::Escape);
     assert_eq!(h.state().views.len(), 1, "Escape cancels even with Don't save chosen");
     assert!(dirty(&h));
 }
@@ -704,8 +705,8 @@ fn the_save_prompt_starts_on_save_every_time_it_opens() {
     let out = temp_path("reopened.pdf");
     let mut h = dirty_prompt();
     h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
-    h.key_press(Key::ArrowLeft);
-    h.key_press(Key::ArrowLeft);
+    h.key_press(Key::ArrowRight);
+    h.key_press(Key::ArrowRight);
     h.run_steps(2);
     h.key_press(Key::Escape);
     h.run_steps(3);

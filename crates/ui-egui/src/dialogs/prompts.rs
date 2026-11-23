@@ -10,10 +10,10 @@ pub(crate) enum PromptButton {
 }
 
 impl PromptButton {
-    const ORDER: [PromptButton; 3] = [PromptButton::DontSave, PromptButton::Cancel, PromptButton::Save];
+    const ORDER: [PromptButton; 3] = [PromptButton::Save, PromptButton::Cancel, PromptButton::DontSave];
 
     fn position(self) -> usize {
-        Self::ORDER.iter().position(|b| *b == self).unwrap_or(2)
+        Self::ORDER.iter().position(|b| *b == self).unwrap_or(0)
     }
 
     /// The button `by` places to the right (negative: left). Arrow keys stop at the ends.
@@ -107,16 +107,17 @@ pub(super) fn save_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
         ui.label(egui::RichText::new(tl!("Your changes will be lost if you don't save them.")).color(t.text_muted));
         ui.add_space(14.0);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            // Right to left: Don't save sits at the right edge, Save at the left, with Cancel between.
             let chosen = app.save_prompt_button;
-            if widgets::pill_button_marked(ui, tl!("Save"), true, chosen == PromptButton::Save).clicked() {
-                choice = Some(Some(true));
+            if widgets::pill_button_marked(ui, tl!("Don't save"), false, chosen == PromptButton::DontSave).clicked() {
+                choice = Some(Some(false));
             }
             if widgets::pill_button_marked(ui, tl!("Cancel"), false, chosen == PromptButton::Cancel).clicked() {
                 choice = Some(None);
             }
             ui.add_space(24.0);
-            if widgets::pill_button_marked(ui, tl!("Don't save"), false, chosen == PromptButton::DontSave).clicked() {
-                choice = Some(Some(false));
+            if widgets::pill_button_marked(ui, tl!("Save"), true, chosen == PromptButton::Save).clicked() {
+                choice = Some(Some(true));
             }
         });
     });

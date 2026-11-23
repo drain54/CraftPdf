@@ -69,11 +69,11 @@ fn compact_layout_at_360x740_fits_chrome_and_hides_side_panels() {
     // Desktop tab strip is absent in compact mode.
     assert!(h.query_by_role_and_label(Role::Button, "Home").is_none());
 
-    // Compact top bar: Menu, Save, More tools ("⋯"), all inside 360 px and >= 44 px tall.
-    let menu = h.get_by_role_and_label(Role::MenuItem, "Menu").rect();
+    // Compact top bar: All tools, Save, More tools ("⋯"), all inside 360 px and >= 44 px tall.
+    let menu = h.get_by_role_and_label(Role::Button, "All tools").rect();
     let save = h.get_by_label_contains("Save (").rect();
     let more = h.get_by_role_and_label(Role::Button, "More tools").rect();
-    for (name, r) in [("menu", menu), ("save", save), ("more", more)] {
+    for (name, r) in [("all tools", menu), ("save", save), ("more", more)] {
         assert!(window.contains_rect(r), "{name} outside window: {r:?}");
         assert!(r.height() >= COMPACT_TOUCH - 0.5, "{name} touch height too small: {r:?}");
     }
@@ -85,13 +85,13 @@ fn compact_layout_at_360x740_fits_chrome_and_hides_side_panels() {
     let doc_w = h.state().views[0].viewport_rect().width();
     assert!(doc_w >= 359.0, "document viewport should span full width, got {doc_w}");
 
-    // Bottom mode bar: single horizontal row with >= 44 px touch targets.
-    let edit_btn = h.get_by_role_and_label(Role::Button, "Edit").rect();
-    let sign_btn = h.get_by_role_and_label(Role::Button, "E-Sign").rect();
-    assert!(edit_btn.height() >= COMPACT_TOUCH - 0.5, "edit_btn {edit_btn:?}");
-    assert!(sign_btn.height() >= COMPACT_TOUCH - 0.5, "sign_btn {sign_btn:?}");
-    assert!((edit_btn.top() - sign_btn.top()).abs() < 1.0, "same row: {edit_btn:?} vs {sign_btn:?}");
-    assert!(edit_btn.top() > 680.0, "bottom bar should sit at bottom: {edit_btn:?}");
+    // Bottom bar: the view controls in a single row with >= 44 px touch targets, centred.
+    let out_btn = h.get_by_label_contains("Zoom out").rect();
+    let next_btn = h.get_by_label("Next page").rect();
+    assert!(out_btn.height() >= COMPACT_TOUCH - 0.5, "out_btn {out_btn:?}");
+    assert!(next_btn.height() >= COMPACT_TOUCH - 0.5, "next_btn {next_btn:?}");
+    assert!((out_btn.top() - next_btn.top()).abs() < 1.0, "same row: {out_btn:?} vs {next_btn:?}");
+    assert!(out_btn.top() > 680.0, "bottom bar should sit at bottom: {out_btn:?}");
 
     // Overflow "⋯" menu exposes Find text and Edit page in image editor / Paint.
     h.get_by_role_and_label(Role::Button, "More tools").click();

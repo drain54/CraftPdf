@@ -661,6 +661,17 @@ impl PdfCraftApp {
             }
         };
         let to_printer = self.print_draft.printer.is_some();
+        // Save as PDF has no driver to make the pages grey, and the spooler's grey copy is for
+        // printers only, so the saved file is made grey here. Print as image renders grey already.
+        let bytes = if !to_printer && self.print_draft.grayscale && !self.print_draft.as_image {
+            let shared = std::sync::Arc::new(bytes);
+            match pdfcraft_engine::spooler::greyed(shared.clone()) {
+                Some(Some(grey)) => grey,
+                _ => (*shared).clone(),
+            }
+        } else {
+            bytes
+        };
         let sent = match self.print_draft.printer.clone() {
             #[cfg(target_arch = "wasm32")]
             Some(printer) if printer == crate::web_print::BROWSER_PRINTER => {

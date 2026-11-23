@@ -7,7 +7,7 @@ use crate::canvas::{DocView, Fit, PageLayout};
 use crate::panes::{Place, TabDrop};
 use crate::tab_context::Action;
 use crate::theme::{self, ThemePreference, Tokens};
-use crate::{Dialog, LeftPanel, Mode, PdfCraftApp, PropsTab, QuickTool, RightPanel, icons, widgets, window_controls};
+use crate::{Dialog, Mode, PdfCraftApp, PropsTab, QuickTool, RightPanel, icons, widgets, window_controls};
 
 /// Height of the tab strip when it doubles as the macOS title bar (#789). AppKit draws the traffic
 /// lights itself, centred in the standard 28 pt title-bar band at the top of the window, and moving
@@ -602,7 +602,7 @@ fn tab_name(name: &str) -> String {
 /// The width a tab takes when nothing has to shrink.
 fn tab_natural_width(ui: &egui::Ui, t: &Tokens, name: &str) -> f32 {
     let label = tab_name(name);
-    ui.fonts_mut(|f| f.layout_no_wrap(label, theme::regular(13.0), t.text).size().x) + TAB_CHROME
+    ui.fonts_mut(|f| f.layout_no_wrap(label, theme::medium(13.0), t.text).size().x) + TAB_CHROME
 }
 
 /// The widest any tab may be so that tabs of `natural` widths, `gap` apart, fit in `budget`:
@@ -647,7 +647,7 @@ struct TabSpec<'a> {
 
 fn tab(ui: &mut egui::Ui, spec: TabSpec<'_>, close: &mut Option<usize>) -> egui::Response {
     let TabSpec { id, theme: t, icon, name, file, dirty, active, index, cap, height, draggable } = spec;
-    let font = theme::regular(13.0);
+    let font = theme::medium(13.0);
     let mut label = tab_name(name);
     // A shrunk tab shows as much of its name as fits (the tooltip has all of it).
     if let Some(cap) = cap {
@@ -726,7 +726,7 @@ pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let hidden = app.hidden_interface();
     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(TOP_FIND_KEY), false));
     if crate::is_compact(ui.ctx()) {
-        compact_top_bar(app, ui, &t, hidden.menubar, hidden.toolbar);
+        compact_top_bar(app, ui, &t, hidden.toolbar);
         return;
     }
     egui::Panel::top("mode_bar")
@@ -870,9 +870,9 @@ pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
         });
 }
 
-/// Compact top bar (`< 700 px`): Menu button, ellipsized file name, Save, and a "⋯" menu for
+/// Compact top bar (`< 700 px`): All tools button, ellipsized file name, Save, and a "⋯" menu for
 /// navigation, Find text, Paint/image editor, and the remaining chrome actions.
-fn compact_top_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, hide_menubar: bool, hide_toolbar: bool) {
+fn compact_top_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, hide_toolbar: bool) {
     let touch = crate::COMPACT_TOUCH;
     egui::Panel::top("mode_bar")
         .exact_size(52.0)
@@ -880,11 +880,19 @@ fn compact_top_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, hide_me
         .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                if app.native_menu.is_none() && !hide_menubar {
-                    app.menu_bar_compact_ui(ui);
-                }
                 if hide_toolbar {
                     return;
+                }
+                // All tools sits where the Menu button was. It shows the expanded All tools view
+                // over the page (the side panes are not drawn in a window this narrow) and a
+                // second press puts it away.
+                let showing = app.mode == Mode::AllTools && app.all_tools_full;
+                if widgets::compact_mode_tab(ui, tl!("All tools"), showing).clicked() {
+                    if showing {
+                        app.all_tools_full = false;
+                    } else {
+                        app.expand_all_tools();
+                    }
                 }
                 let has_doc = app.active.is_some();
                 let right_w = 2.0 * touch + 2.0 * ui.spacing().item_spacing.x;
@@ -1088,53 +1096,80 @@ fn compact_more_menu(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     }
 }
 
-/// Compact bottom bar (`< 700 px`): horizontally scrollable single row of workspace modes and
-/// core tools, each at least [`crate::COMPACT_TOUCH`] (44 px) tall and wide.
+/// Compact bottom bar (`< 700 px`): the view controls in one centred row, each at least as tall
+/// as the bar allows: fit page / fit width, zoom out, the zoom field and its presets, zoom in,
+/// previous view, previous page, the page field, next page, next view, and a zoom slider. The row
+/// scrolls sideways when the window is narrower than it.
 pub fn compact_bottom_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
+    // With no document there is nothing to steer.
+    let Some((index, id)) = app.active_ids() else { return };
+    let Some(doc) = app.session.get(id) else { return };
+    let page_count = doc.info.pages.len();
+    let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
     egui::Panel::bottom("compact_mode_bar")
         .exact_size(52.0)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(6, 4)).stroke(Stroke::new(1.0, t.divider)))
         .show(ui, |ui| {
+            let Some(view) = app.views.get_mut(index) else { return };
+            // The row's width as last drawn: what is left of the bar, halved, goes in front.
+            let width_key = egui::Id::new("pedeep-compact-view-row-width");
+            let avail = ui.available_width();
+            let known = ui.data(|d| d.get_temp::<f32>(width_key));
+            if known.is_none() {
+                ui.ctx().request_repaint();
+            }
+            let row_w = known.unwrap_or(avail);
             ui.style_mut().always_scroll_the_only_direction = true;
             egui::ScrollArea::horizontal()
                 .id_salt("compact_mode_scroll")
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
                     ui.horizontal_centered(|ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        let organizing =
-                            app.left == LeftPanel::Tool("organize") || app.active.and_then(|i| app.views.get(i)).is_some_and(|v| v.organize);
-                        if widgets::compact_mode_tab(ui, tl!("All tools"), app.mode == Mode::AllTools && app.left == LeftPanel::AllTools).clicked() {
-                            app.switch_mode(Mode::AllTools, true);
+                        const B: f32 = crate::COMPACT_TOUCH;
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        ui.add_space(((avail - row_w) / 2.0).max(0.0));
+                        let start = ui.cursor().left();
+                        // Not `columns-2` while fitting the page: that is the two-page view's icon.
+                        let fit_icon = if view.fit == Fit::Width { "maximize" } else { "maximize-2" };
+                        if icons::button(ui, fit_icon, B, false, tl!("Toggle fit page / fit width")).clicked() {
+                            view.fit = if view.fit == Fit::Width { Fit::Page } else { Fit::Width };
+                            view.goto = Some((view.current, 0.0));
                         }
-                        if widgets::compact_mode_tab(ui, tl!("Edit"), app.mode == Mode::Edit).clicked() {
-                            app.switch_mode(Mode::Edit, true);
+                        let tip = crate::commands::key_tip(ui.ctx(), tl!("Zoom out ({key})"), crate::commands::ZOOM_OUT);
+                        if icons::button(ui, "zoom-out", B, false, &tip).clicked() {
+                            view.zoom_step(false);
                         }
-                        if widgets::compact_mode_tab(ui, tl!("E-Sign"), app.mode == Mode::Sign).clicked() {
-                            app.switch_mode(Mode::Sign, true);
+                        zoom_field(ui, &t, view);
+                        let tip = crate::commands::key_tip(ui.ctx(), tl!("Zoom in ({key})"), crate::commands::ZOOM_IN);
+                        if icons::button(ui, "zoom-in", B, false, &tip).clicked() {
+                            view.zoom_step(true);
                         }
-                        if widgets::compact_mode_tab(ui, tl!("Scan & OCR"), app.left == LeftPanel::Tool("scan")).clicked() {
-                            app.select_tool("scan");
+                        let tip = format!("{} ({})", tl!("Previous view"), crate::commands::shortcut_label(ui.ctx(), crate::commands::PREV_VIEW));
+                        if ui.add_enabled_ui(!view.back.is_empty(), |ui| icons::button(ui, "chevron-left", B, false, &tip)).inner.clicked() {
+                            view.view_history(false);
                         }
-                        if widgets::compact_mode_tab(ui, tl!("Organize pages"), organizing).clicked() {
-                            app.select_tool("organize");
+                        if icons::button(ui, "chevron-up", B, false, tl!("Previous page")).clicked() {
+                            view.step_page(false);
                         }
-                        if widgets::compact_mode_tab(ui, tl!("Convert"), app.mode == Mode::Convert).clicked() {
-                            app.switch_mode(Mode::Convert, true);
+                        page_field(ui, &t, view, &labels, page_count);
+                        if icons::button(ui, "chevron-down", B, false, tl!("Next page")).clicked() {
+                            view.step_page(true);
                         }
-                        if widgets::compact_mode_tab(ui, tl!("Add comments"), app.left == LeftPanel::Tool("comment")).clicked() {
-                            app.select_tool("comment");
+                        let tip = format!("{} ({})", tl!("Next view"), crate::commands::shortcut_label(ui.ctx(), crate::commands::NEXT_VIEW));
+                        if ui.add_enabled_ui(!view.forward.is_empty(), |ui| icons::button(ui, "chevron-right", B, false, &tip)).inner.clicked() {
+                            view.view_history(true);
                         }
-                        if widgets::compact_mode_tab(ui, tl!("Compress"), app.left == LeftPanel::Tool("compress")).clicked() {
-                            app.select_tool("compress");
+                        // Zoom slider: 10 % to 800 %, evenly spread by ratio like the zoom steps.
+                        let mut zoom = view.zoom.clamp(0.1, 8.0);
+                        ui.spacing_mut().slider_width = 120.0;
+                        let slider = ui.add(egui::Slider::new(&mut zoom, 0.1..=8.0).logarithmic(true).show_value(false));
+                        ui.ctx().accesskit_node_builder(slider.id, |node| node.set_label(tl!("Zoom")));
+                        if slider.changed() {
+                            view.set_zoom(zoom);
                         }
-                        if widgets::compact_mode_tab(ui, tl!("Protect"), app.left == LeftPanel::Tool("protect")).clicked() {
-                            app.select_tool("protect");
-                        }
-                        if widgets::compact_mode_tab(ui, tl!("Read mode"), app.mode == Mode::Read).clicked() {
-                            app.switch_mode(Mode::Read, true);
-                        }
+                        let width = ui.cursor().left() - start;
+                        ui.data_mut(|d| d.insert_temp(width_key, width));
                     });
                 });
         });
@@ -1229,58 +1264,8 @@ fn find_text_field(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
 /// `level` folds it for narrower windows: 0 shows everything; 1 drops the zoom −/+ and the view
 /// history buttons (the zoom field and its presets stay); 2 also moves page display, rotate and
 /// fit into a ⋯ menu, with the view history.
-fn nav_cluster(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, level: u8) -> f32 {
-    let Some((index, id)) = app.active_ids() else { return 0.0 };
-    let Some(doc) = app.session.get(id) else { return 0.0 };
-    let page_count = doc.info.pages.len();
-    let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
-    let start = ui.cursor().left();
-    let mut page_display = None;
-    ui.spacing_mut().item_spacing.x = 1.0;
-    // Show or hide the navigation rail; it stays reachable here when hidden.
-    let on_right = app.side_panels.rail_on_right();
-    let tip = if app.rail_hidden { tl!("Show navigation rail") } else { tl!("Hide navigation rail") };
-    if icons::button(ui, if on_right { "panel-right" } else { "panel-left" }, 28.0, !app.rail_hidden, tip).clicked() {
-        app.rail_hidden = !app.rail_hidden;
-    }
-    // Select and Hand, moved here from the rail.
-    crate::hotbar::pointer_tool_buttons(ui, app, 28.0);
-    ui.add_space(4.0);
-    ui.painter().vline(ui.cursor().left(), ui.max_rect().y_range().shrink(14.0), Stroke::new(1.0, t.divider));
-    ui.add_space(5.0);
-    let Some(view) = app.views.get_mut(index) else { return 0.0 };
-    let divider = |ui: &mut egui::Ui| {
-        ui.add_space(4.0);
-        ui.painter().vline(ui.cursor().left(), ui.max_rect().y_range().shrink(14.0), Stroke::new(1.0, t.divider));
-        ui.add_space(5.0);
-    };
-    const B: f32 = 28.0;
-    if level < 2 {
-        let tip = crate::i18n::fmt(tl!("Page display: {layout}"), &[("layout", tl!(view.layout.label()))]);
-        let resp = icons::button(ui, view.layout.icon(), B, false, &tip);
-        page_display = egui::Popup::menu(&resp)
-            .show(|ui| {
-                ui.set_min_width(220.0);
-                rail_view_menu(ui, view)
-            })
-            .and_then(|r| r.inner)
-            .or(page_display);
-        let tip = crate::commands::key_tip(ui.ctx(), tl!("Rotate view clockwise ({key})"), crate::commands::ROTATE_CW);
-        if icons::button(ui, "rotate-cw", B, false, &tip).clicked() {
-            view.rotate_view(true);
-        }
-        // Not `columns-2` while fitting the page: that is the two-page view's icon.
-        let fit_icon = if view.fit == Fit::Width { "maximize" } else { "maximize-2" };
-        if icons::button(ui, fit_icon, B, false, tl!("Toggle fit page / fit width")).clicked() {
-            view.fit = if view.fit == Fit::Width { Fit::Page } else { Fit::Width };
-            view.goto = Some((view.current, 0.0));
-        }
-        divider(ui);
-    }
-    let tip = crate::commands::key_tip(ui.ctx(), tl!("Zoom out ({key})"), crate::commands::ZOOM_OUT);
-    if level == 0 && icons::button(ui, "zoom-out", B, false, &tip).clicked() {
-        view.zoom_step(false);
-    }
+/// The zoom field (type a percentage and press Enter) and its presets menu.
+fn zoom_field(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView) {
     let zoom_id = egui::Id::unique("zoom-input");
     let draft = zoom_id.with("draft");
     let mut typed = ui.data(|d| d.get_temp::<String>(draft)).unwrap_or_else(|| format!("{:.0}%", view.zoom * 100.0));
@@ -1322,19 +1307,10 @@ fn nav_cluster(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, level: u8) 
             }
         }
     });
-    let tip = crate::commands::key_tip(ui.ctx(), tl!("Zoom in ({key})"), crate::commands::ZOOM_IN);
-    if level == 0 && icons::button(ui, "zoom-in", B, false, &tip).clicked() {
-        view.zoom_step(true);
-    }
-    divider(ui);
-    // History is distinct from stepping to the adjacent page, and belongs to this tab.
-    let tip = format!("{} ({})", tl!("Previous view"), crate::commands::shortcut_label(ui.ctx(), crate::commands::PREV_VIEW));
-    if level == 0 && ui.add_enabled_ui(!view.back.is_empty(), |ui| icons::button(ui, "chevron-left", B, false, &tip)).inner.clicked() {
-        view.view_history(false);
-    }
-    if icons::button(ui, "chevron-up", B, false, tl!("Previous page")).clicked() {
-        view.step_page(false);
-    }
+}
+
+/// The current page field, with the page count after it.
+fn page_field(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, labels: &[String], page_count: usize) {
     let page_input_id = view.page_input_id();
     // Consume replacement selection once, including when the editor has lost focus.
     let reselect = std::mem::take(&mut view.page_input_reselect);
@@ -1369,12 +1345,83 @@ fn nav_cluster(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, level: u8) 
     let of = crate::i18n::fmt(tl!("Page {p} of {n}"), &[("p", &shown.to_string()), ("n", &page_count.to_string())]);
     let position = if position.contains('/') { format!("({position})") } else { format!("/ {position}") };
     ui.label(egui::RichText::new(position).font(theme::regular(12.0)).color(t.text_muted)).on_hover_text(of);
+}
+
+fn nav_cluster(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, level: u8) -> f32 {
+    let Some((index, id)) = app.active_ids() else { return 0.0 };
+    let Some(doc) = app.session.get(id) else { return 0.0 };
+    let page_count = doc.info.pages.len();
+    let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
+    let start = ui.cursor().left();
+    let mut page_display = None;
+    ui.spacing_mut().item_spacing.x = 1.0;
+    // Show or hide the navigation rail; it stays reachable here when hidden.
+    let on_right = app.side_panels.rail_on_right();
+    let tip = if app.rail_hidden { tl!("Show navigation rail") } else { tl!("Hide navigation rail") };
+    if icons::button(ui, if on_right { "panel-right" } else { "panel-left" }, 28.0, !app.rail_hidden, tip).clicked() {
+        app.rail_hidden = !app.rail_hidden;
+    }
+    // Select and Hand, moved here from the rail.
+    crate::hotbar::pointer_tool_buttons(ui, app, 28.0);
+    ui.add_space(4.0);
+    ui.painter().vline(ui.cursor().left(), ui.max_rect().y_range().shrink(14.0), Stroke::new(1.0, t.divider));
+    ui.add_space(5.0);
+    let Some(view) = app.views.get_mut(index) else { return 0.0 };
+    let divider = |ui: &mut egui::Ui| {
+        ui.add_space(4.0);
+        ui.painter().vline(ui.cursor().left(), ui.max_rect().y_range().shrink(14.0), Stroke::new(1.0, t.divider));
+        ui.add_space(5.0);
+    };
+    const B: f32 = 28.0;
+    // Page navigation comes first, left of Page display: Previous view, Previous page, the page
+    // field, Next page, Next view. History is distinct from stepping to the adjacent page, and
+    // belongs to this tab.
+    let tip = format!("{} ({})", tl!("Previous view"), crate::commands::shortcut_label(ui.ctx(), crate::commands::PREV_VIEW));
+    if level == 0 && ui.add_enabled_ui(!view.back.is_empty(), |ui| icons::button(ui, "chevron-left", B, false, &tip)).inner.clicked() {
+        view.view_history(false);
+    }
+    if icons::button(ui, "chevron-up", B, false, tl!("Previous page")).clicked() {
+        view.step_page(false);
+    }
+    page_field(ui, t, view, &labels, page_count);
     if icons::button(ui, "chevron-down", B, false, tl!("Next page")).clicked() {
         view.step_page(true);
     }
     let tip = format!("{} ({})", tl!("Next view"), crate::commands::shortcut_label(ui.ctx(), crate::commands::NEXT_VIEW));
     if level == 0 && ui.add_enabled_ui(!view.forward.is_empty(), |ui| icons::button(ui, "chevron-right", B, false, &tip)).inner.clicked() {
         view.view_history(true);
+    }
+    divider(ui);
+    if level < 2 {
+        let tip = crate::i18n::fmt(tl!("Page display: {layout}"), &[("layout", tl!(view.layout.label()))]);
+        let resp = icons::button(ui, view.layout.icon(), B, false, &tip);
+        page_display = egui::Popup::menu(&resp)
+            .show(|ui| {
+                ui.set_min_width(220.0);
+                rail_view_menu(ui, view)
+            })
+            .and_then(|r| r.inner)
+            .or(page_display);
+        let tip = crate::commands::key_tip(ui.ctx(), tl!("Rotate view clockwise ({key})"), crate::commands::ROTATE_CW);
+        if icons::button(ui, "rotate-cw", B, false, &tip).clicked() {
+            view.rotate_view(true);
+        }
+        // Not `columns-2` while fitting the page: that is the two-page view's icon.
+        let fit_icon = if view.fit == Fit::Width { "maximize" } else { "maximize-2" };
+        if icons::button(ui, fit_icon, B, false, tl!("Toggle fit page / fit width")).clicked() {
+            view.fit = if view.fit == Fit::Width { Fit::Page } else { Fit::Width };
+            view.goto = Some((view.current, 0.0));
+        }
+        divider(ui);
+    }
+    let tip = crate::commands::key_tip(ui.ctx(), tl!("Zoom out ({key})"), crate::commands::ZOOM_OUT);
+    if level == 0 && icons::button(ui, "zoom-out", B, false, &tip).clicked() {
+        view.zoom_step(false);
+    }
+    zoom_field(ui, t, view);
+    let tip = crate::commands::key_tip(ui.ctx(), tl!("Zoom in ({key})"), crate::commands::ZOOM_IN);
+    if level == 0 && icons::button(ui, "zoom-in", B, false, &tip).clicked() {
+        view.zoom_step(true);
     }
     // Folded away: what no longer fits, in one menu.
     if level >= 1 {
@@ -1454,9 +1501,9 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     };
     let has = |has: bool, label: &'static str| has.then_some(label);
     let mut items = vec![
+        item(RightPanel::Pages, "files", "Page thumbnails", None),
         item(RightPanel::Comments, "message-square-text", "Comments", has(has_comments, "Has comments")),
         item(RightPanel::Bookmarks, "bookmark", "Bookmarks", has(has_outline, "Has bookmarks")),
-        item(RightPanel::Pages, "files", "Page thumbnails", None),
         item(RightPanel::Fields, "text-cursor-input", "Form fields", has(has_fields, "Has form fields")),
         item(RightPanel::Layers, "layers", "Layers", has(has_layers, "Has layers")),
         item(RightPanel::Attachments, "paperclip", "Attachments", has(has_files, "Has attachments")),

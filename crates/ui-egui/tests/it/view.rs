@@ -2887,15 +2887,20 @@ fn the_pages_panel_tools_act_on_the_selected_pages() {
         h.get_by_label(label).click();
         h.run_steps(3);
     };
+    // Rotate and Delete are buttons of their own in the panel's header, not in the menu.
+    let button = |h: &mut Harness<'static, PdfCraftApp>, label: &str| {
+        h.get_all_by_label(label).find(|n| n.rect().left() > 1000.0).expect("a button in the Pages panel").click();
+        h.run_steps(3);
+    };
     h.state_mut().views[0].select_pages(&[1, 2]);
     h.run_steps(2);
-    tool(&mut h, "Rotate the selected pages clockwise");
+    button(&mut h, "Rotate the selected pages clockwise");
     assert_eq!(rotations(&h), [0, 90, 90], "pages 2 and 3, the selection");
-    tool(&mut h, "Rotate the selected pages counterclockwise");
+    button(&mut h, "Rotate the selected pages counterclockwise");
     assert_eq!(rotations(&h), [0, 0, 0]);
     h.state_mut().views[0].select_pages(&[0]);
     h.run_steps(2);
-    tool(&mut h, "Delete the selected pages");
+    button(&mut h, "Delete the selected pages");
     assert_eq!(h.state().session.get(id).unwrap().info.pages.len(), 2, "page 1 deleted");
     tool(&mut h, "Insert a blank page after the selection");
     assert_eq!(h.state().session.get(id).unwrap().info.pages.len(), 3);

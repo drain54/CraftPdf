@@ -86,7 +86,8 @@ impl PdfCraftApp {
             mode_override: None,
             left: LeftPanel::AllTools,
             side_panels: Default::default(),
-            left_open: true,
+            // The All tools pane starts closed: the page thumbnails open first.
+            left_open: false,
             right: None,
             last_right: RightPanel::Comments,
             right_before_read: None,

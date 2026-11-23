@@ -615,23 +615,6 @@ impl PdfCraftApp {
         }
     }
 
-    /// Compact-mode menu bar: collapses all top-level menus into the single "Menu" button.
-    pub(crate) fn menu_bar_compact_ui(&mut self, ui: &mut egui::Ui) {
-        let ctx = ui.ctx().clone();
-        let bar = craft_menu::layout(&self.menu_bar(&ctx), Target::current(), &layout_options()).bar;
-        let gate = self.menu_gate(&ctx);
-        let chosen = craft_menu::MenuBarUi::new(&bar)
-            .gate(gate)
-            .label(&translate)
-            .english(&english)
-            .id(egui::Id::unique("pdfcraft-menu-bar"))
-            .shrink_to_fit(0.0)
-            .show(ui);
-        for command in chosen {
-            self.run_menu_command(&ctx, &command);
-        }
-    }
-
     /// Install the native menu bar (macOS), once, from the eframe app creator. `false` when
     /// AppKit refused it: the in-window bar stays.
     #[cfg(target_os = "macos")]

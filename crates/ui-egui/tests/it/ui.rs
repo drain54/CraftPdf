@@ -307,7 +307,7 @@ fn closed_side_panes_stay_closed_after_a_restart_and_opening_a_pdf() {
     use pdfcraft_ui_egui::RightPanel;
     let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
     assert_eq!(h.state().right, Some(RightPanel::Comments));
-    assert!(h.state().left_open);
+    assert!(!h.state().left_open, "All tools starts closed");
     h.state_mut().choose_right_panel(None);
     h.state_mut().set_option("left", "closed").unwrap();
     h.run_steps(3);

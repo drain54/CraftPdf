@@ -1103,9 +1103,10 @@ impl crate::PdfCraftApp {
         match result {
             Ok(image) => {
                 let d = &mut self.signature_draft;
-                d.remove_bg = true;
+                // Off until the person ticks it; the strength is where the slider starts then.
+                d.remove_bg = false;
                 d.bg_strength = 50;
-                d.image = Some(without_background(&image, true, 50));
+                d.image = Some(without_background(&image, false, 50));
                 d.image_source = Some(image);
                 self.toast = None;
             }
