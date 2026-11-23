@@ -66,22 +66,20 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(tl!(title)).font(theme::semibold(15.5)));
-                            if let Some(c) = count {
-                                ui.label(egui::RichText::new(c.to_string()).font(theme::medium(13.0)).color(t.text_faint));
-                            }
-                        });
+                        // The Pages panel has no title or page count: its thumbnails speak for it.
+                        if panel != RightPanel::Pages {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(tl!(title)).font(theme::semibold(15.5)));
+                                if let Some(c) = count {
+                                    ui.label(egui::RichText::new(c.to_string()).font(theme::medium(13.0)).color(t.text_faint));
+                                }
+                            });
+                        }
                         if replies > 0 {
                             let text = crate::i18n::trn(crate::i18n::current(), replies as u64, "{n} reply", "{n} replies");
                             ui.label(egui::RichText::new(text).font(theme::regular(11.0)).color(t.text_faint));
                         }
                     });
-                    if panel == RightPanel::Pages && view.selected.len() > 1 {
-                        let n = view.selected.len().to_string();
-                        let picked = crate::i18n::fmt(tl!("{n} pages selected"), &[("n", &n)]);
-                        ui.label(egui::RichText::new(picked).font(theme::medium(12.0)).color(t.accent_text));
-                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if icons::button(ui, "x", 26.0, false, tl!("Close")).clicked() {
                             close = true;

@@ -46,15 +46,11 @@ pub(super) fn page_tools(ui: &mut egui::Ui, enabled: bool) -> Option<&'static st
 pub(super) fn thumbnail_size(ui: &mut egui::Ui, t: &Tokens, view: &mut crate::DocView, enabled: bool) {
     let before = view.thumbnail_zoom();
     let mut zoom = before;
-    let label = ui
-        .horizontal(|ui| {
-            let label = ui.label(egui::RichText::new(tl!("Thumbnail size")).small().color(t.text_muted));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(egui::RichText::new(format!("{:.0}%", before * 100.0)).small().color(t.text_muted));
-            });
-            label
-        })
-        .inner;
+    // Above the slider: how many pages are selected, when several are. (A blank line keeps the
+    // slider where it is when none are.)
+    let picked = view.selected.len();
+    let text = if picked > 1 { crate::i18n::fmt(tl!("{n} pages selected"), &[("n", &picked.to_string())]) } else { " ".to_string() };
+    ui.label(egui::RichText::new(text).small().color(t.accent_text));
     ui.add_enabled_ui(enabled, |ui| {
         ui.spacing_mut().slider_width = (ui.available_width() - 52.0 - 2.0 * ui.spacing().item_spacing.x).max(1.0);
         ui.horizontal(|ui| {
@@ -72,7 +68,7 @@ pub(super) fn thumbnail_size(ui: &mut egui::Ui, t: &Tokens, view: &mut crate::Do
             ui.scope(|ui| {
                 // The regular field fill blends into this panel; keep the slider's full rail visible.
                 ui.visuals_mut().widgets.inactive.bg_fill = t.border;
-                let slider = ui.add(egui::Slider::new(&mut percent, range).step_by(1.0).show_value(false).trailing_fill(true)).labelled_by(label.id);
+                let slider = ui.add(egui::Slider::new(&mut percent, range).step_by(1.0).show_value(false).trailing_fill(true));
                 slider.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), f64::from(percent), tl!("Thumbnail size")));
             });
             zoom = percent / 100.0;

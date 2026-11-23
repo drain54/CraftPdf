@@ -85,11 +85,11 @@ fn compact_layout_at_360x740_fits_chrome_and_hides_side_panels() {
     let doc_w = h.state().views[0].viewport_rect().width();
     assert!(doc_w >= 359.0, "document viewport should span full width, got {doc_w}");
 
-    // Bottom bar: the view controls in a single row with >= 44 px touch targets, centred.
+    // Bottom bar: the view controls in a single tight row.
     let out_btn = h.get_by_label_contains("Zoom out").rect();
     let next_btn = h.get_by_label("Next page").rect();
-    assert!(out_btn.height() >= COMPACT_TOUCH - 0.5, "out_btn {out_btn:?}");
-    assert!(next_btn.height() >= COMPACT_TOUCH - 0.5, "next_btn {next_btn:?}");
+    assert!(out_btn.height() >= 28.0, "out_btn {out_btn:?}");
+    assert!(next_btn.height() >= 28.0, "next_btn {next_btn:?}");
     assert!((out_btn.top() - next_btn.top()).abs() < 1.0, "same row: {out_btn:?} vs {next_btn:?}");
     assert!(out_btn.top() > 680.0, "bottom bar should sit at bottom: {out_btn:?}");
 

@@ -464,8 +464,9 @@ fn tab_drag(
     }
 }
 
-/// The tab strip of split view's second pane, in `strip`: its tabs share the width (no scrolling),
-/// and are clicked, closed, moved along and dragged to the other pane as in the main strip.
+/// The tab strip of split view's second pane, in `strip`: its tabs share the width and, once they
+/// reach their narrowest, scroll with arrows either side as in the main strip. They are clicked,
+/// closed, moved along and dragged to the other pane as there.
 pub(crate) fn pane_tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui, strip: Rect, place: Place) {
     let t = Tokens::get(ui.ctx());
     ui.painter().rect_filled(strip, 0.0, t.titlebar);
@@ -474,49 +475,93 @@ pub(crate) fn pane_tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui, strip: Re
     let front = app.pane_front(place);
     let inner = Rect::from_min_max(strip.min + vec2(6.0, 2.0), strip.max - vec2(6.0, 0.0));
     let mut row = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Max)).id_salt(("tab-row", place)));
-    row.spacing_mut().item_spacing.x = 4.0;
+    let gap = 4.0;
+    row.spacing_mut().item_spacing.x = gap;
     let natural: Vec<f32> = tabs.iter().filter_map(|&i| crate::canvas::tab_label(app, i)).map(|name| tab_natural_width(&row, &t, &name)).collect();
-    let cap = tab_cap(&natural, row.available_width(), 4.0, TAB_MIN_WIDTH);
+    let mut tabs_width = row.available_width();
+    let overflow = tabs_overflow(&natural, tabs_width, gap, TAB_MIN_WIDTH);
+    if overflow {
+        tabs_width = (tabs_width - 2.0 * (TAB_ARROW + gap)).max(0.0);
+    }
+    let cap = tab_cap(&natural, tabs_width, gap, TAB_MIN_WIDTH);
+    // Where the tabs were scrolled to last frame, and how far they can go.
+    let scroll_id = row.scope_id().with("pane_tab_scroll");
+    let (offset, max_offset) = row.data(|d| d.get_temp::<(f32, f32)>(scroll_id)).unwrap_or((0.0, 0.0));
+    let left_clicked = overflow && arrow(&mut row, "chevron-left", offset > 0.5, tl!("Scroll tabs left"));
+    // Keyed by document: the front tab is brought into view when it, or the tab count, changes.
+    let state = (front.and_then(|i| app.views.get(i)).map(|v| v.id), tabs.len());
+    let changed = row.data_mut(|data| {
+        let id = scroll_id.with("front");
+        let changed = data.get_temp::<(Option<pdfcraft_engine::DocId>, usize)>(id) != Some(state);
+        data.insert_temp(id, state);
+        changed
+    });
     let mut close = None;
     let mut action = None;
-    let mut slots = Vec::with_capacity(tabs.len());
-    let mut dragged = None;
-    for &i in &tabs {
-        let Some(view) = app.views.get(i) else { continue };
-        let Some(doc) = app.session.get(view.id) else { continue };
-        let Some(name) = crate::canvas::tab_label(app, i) else { continue };
-        let dirty = doc.dirty;
-        let file = (name != doc.name).then(|| doc.name.clone());
-        let id = row.scope_id().with(("pane-tab", view.view_key()));
-        let spec = TabSpec {
-            id,
-            theme: &t,
-            icon: "file-text",
-            name: &name,
-            file: file.as_deref(),
-            dirty,
-            active: front == Some(i),
-            index: i,
-            cap,
-            height: inner.height(),
-            draggable: true,
-        };
-        let response = tab(&mut row, spec, &mut close);
-        slots.push((i, response.rect));
-        if response.dragged() || response.drag_stopped() {
-            dragged = Some((i, response.drag_stopped()));
-        }
-        response.context_menu(|ui| tab_menu(app, ui, i, &mut action));
-        if response.clicked() {
-            app.active = Some(i);
-            app.combine_tab.focused = false;
-        }
-        // A middle click closes the tab, as in the main strip (#1853).
-        if response.middle_clicked() {
-            close = Some(i);
-        }
+    let mut area = egui::ScrollArea::horizontal().id_salt(("pane-tabs", place)).max_width(tabs_width).auto_shrink([true, true]);
+    if let Some(x) = row.data_mut(|d| d.remove_temp::<f32>(scroll_id.with("to"))) {
+        area = area.horizontal_scroll_offset(x);
     }
-    tab_drag(app, &row, &slots, dragged, place, close.is_some() || action.is_some(), false);
+    row.style_mut().always_scroll_the_only_direction = true;
+    let out = area.show(&mut row, |ui| {
+        ui.horizontal_centered(|ui| {
+            let mut slots = Vec::with_capacity(tabs.len());
+            let mut dragged = None;
+            for &i in &tabs {
+                let Some(view) = app.views.get(i) else { continue };
+                let Some(doc) = app.session.get(view.id) else { continue };
+                let Some(name) = crate::canvas::tab_label(app, i) else { continue };
+                let dirty = doc.dirty;
+                let file = (name != doc.name).then(|| doc.name.clone());
+                let id = ui.scope_id().with(("pane-tab", view.view_key()));
+                let spec = TabSpec {
+                    id,
+                    theme: &t,
+                    icon: "file-text",
+                    name: &name,
+                    file: file.as_deref(),
+                    dirty,
+                    active: front == Some(i),
+                    index: i,
+                    cap,
+                    height: inner.height(),
+                    draggable: true,
+                };
+                let response = tab(ui, spec, &mut close);
+                slots.push((i, response.rect));
+                if response.dragged() || response.drag_stopped() {
+                    dragged = Some((i, response.drag_stopped()));
+                }
+                if changed && front == Some(i) {
+                    response.scroll_to_me(Some(Align::Center));
+                }
+                response.context_menu(|ui| tab_menu(app, ui, i, &mut action));
+                if response.clicked() {
+                    app.active = Some(i);
+                    app.combine_tab.focused = false;
+                }
+                // A middle click closes the tab, as in the main strip (#1853).
+                if response.middle_clicked() {
+                    close = Some(i);
+                }
+            }
+            tab_drag(app, ui, &slots, dragged, place, close.is_some() || action.is_some(), false);
+        });
+    });
+    let max = (out.content_size.x - out.inner_rect.width()).max(0.0);
+    row.data_mut(|d| d.insert_temp(scroll_id, (out.state.clamped_offset().x, max)));
+    let right_clicked = overflow && arrow(&mut row, "chevron-right", offset < max_offset - 0.5, tl!("Scroll tabs right"));
+    let mut scroll_to = None;
+    if left_clicked {
+        scroll_to = Some((offset - (TAB_MIN_WIDTH + gap)).max(0.0));
+    }
+    if right_clicked {
+        scroll_to = Some((offset + TAB_MIN_WIDTH + gap).min(max_offset));
+    }
+    if let Some(x) = scroll_to {
+        row.data_mut(|d| d.insert_temp(scroll_id.with("to"), x));
+        row.ctx().request_repaint();
+    }
     if let Some(i) = close
         && let Some(view) = app.views.get(i)
     {
@@ -1097,7 +1142,7 @@ fn compact_more_menu(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
 }
 
 /// Compact bottom bar (`< 700 px`): the view controls in one centred row, each at least as tall
-/// as the bar allows: fit page / fit width, zoom out, the zoom field and its presets, zoom in,
+/// compact: fit page / fit width, zoom out, the zoom field and its presets, zoom in,
 /// previous view, previous page, the page field, next page, next view, and a zoom slider. The row
 /// scrolls sideways when the window is narrower than it.
 pub fn compact_bottom_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
@@ -1108,8 +1153,8 @@ pub fn compact_bottom_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let page_count = doc.info.pages.len();
     let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
     egui::Panel::bottom("compact_mode_bar")
-        .exact_size(52.0)
-        .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(6, 4)).stroke(Stroke::new(1.0, t.divider)))
+        .exact_size(40.0)
+        .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(6, 3)).stroke(Stroke::new(1.0, t.divider)))
         .show(ui, |ui| {
             let Some(view) = app.views.get_mut(index) else { return };
             // The row's width as last drawn: what is left of the bar, halved, goes in front.
@@ -1126,8 +1171,15 @@ pub fn compact_bottom_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
                     ui.horizontal_centered(|ui| {
-                        const B: f32 = crate::COMPACT_TOUCH;
-                        ui.spacing_mut().item_spacing.x = 2.0;
+                        const B: f32 = 30.0;
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        // Compact mode raises the touch height; here the fields and the slider match the buttons.
+                        ui.spacing_mut().interact_size.y = B;
+                        let divider = |ui: &mut egui::Ui| {
+                            ui.add_space(5.0);
+                            ui.painter().vline(ui.cursor().left(), ui.max_rect().y_range().shrink(8.0), Stroke::new(1.0, t.divider));
+                            ui.add_space(6.0);
+                        };
                         ui.add_space(((avail - row_w) / 2.0).max(0.0));
                         let start = ui.cursor().left();
                         // Not `columns-2` while fitting the page: that is the two-page view's icon.
@@ -1136,6 +1188,7 @@ pub fn compact_bottom_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                             view.fit = if view.fit == Fit::Width { Fit::Page } else { Fit::Width };
                             view.goto = Some((view.current, 0.0));
                         }
+                        divider(ui);
                         let tip = crate::commands::key_tip(ui.ctx(), tl!("Zoom out ({key})"), crate::commands::ZOOM_OUT);
                         if icons::button(ui, "zoom-out", B, false, &tip).clicked() {
                             view.zoom_step(false);
@@ -1145,6 +1198,7 @@ pub fn compact_bottom_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         if icons::button(ui, "zoom-in", B, false, &tip).clicked() {
                             view.zoom_step(true);
                         }
+                        divider(ui);
                         let tip = format!("{} ({})", tl!("Previous view"), crate::commands::shortcut_label(ui.ctx(), crate::commands::PREV_VIEW));
                         if ui.add_enabled_ui(!view.back.is_empty(), |ui| icons::button(ui, "chevron-left", B, false, &tip)).inner.clicked() {
                             view.view_history(false);
@@ -1160,9 +1214,10 @@ pub fn compact_bottom_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         if ui.add_enabled_ui(!view.forward.is_empty(), |ui| icons::button(ui, "chevron-right", B, false, &tip)).inner.clicked() {
                             view.view_history(true);
                         }
+                        divider(ui);
                         // Zoom slider: 10 % to 800 %, evenly spread by ratio like the zoom steps.
                         let mut zoom = view.zoom.clamp(0.1, 8.0);
-                        ui.spacing_mut().slider_width = 120.0;
+                        ui.spacing_mut().slider_width = 110.0;
                         let slider = ui.add(egui::Slider::new(&mut zoom, 0.1..=8.0).logarithmic(true).show_value(false));
                         ui.ctx().accesskit_node_builder(slider.id, |node| node.set_label(tl!("Zoom")));
                         if slider.changed() {
