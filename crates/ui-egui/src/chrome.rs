@@ -1173,8 +1173,10 @@ pub fn compact_bottom_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     ui.horizontal_centered(|ui| {
                         const B: f32 = 30.0;
                         ui.spacing_mut().item_spacing.x = 0.0;
-                        // Compact mode raises the touch height; here the fields and the slider match the buttons.
-                        ui.spacing_mut().interact_size.y = B;
+                        // The fields and the slider's handle share one height, below the buttons'.
+                        const FIELD_H: f32 = 20.0;
+                        // The slider's handle is 0.8 of its height across.
+                        ui.spacing_mut().interact_size.y = FIELD_H * 1.25;
                         let divider = |ui: &mut egui::Ui| {
                             ui.add_space(5.0);
                             ui.painter().vline(ui.cursor().left(), ui.max_rect().y_range().shrink(8.0), Stroke::new(1.0, t.divider));
@@ -1193,7 +1195,7 @@ pub fn compact_bottom_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         if icons::button(ui, "zoom-out", B, false, &tip).clicked() {
                             view.zoom_step(false);
                         }
-                        zoom_field(ui, &t, view);
+                        zoom_field(ui, &t, view, FIELD_H);
                         let tip = crate::commands::key_tip(ui.ctx(), tl!("Zoom in ({key})"), crate::commands::ZOOM_IN);
                         if icons::button(ui, "zoom-in", B, false, &tip).clicked() {
                             view.zoom_step(true);
@@ -1206,7 +1208,7 @@ pub fn compact_bottom_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         if icons::button(ui, "chevron-up", B, false, tl!("Previous page")).clicked() {
                             view.step_page(false);
                         }
-                        page_field(ui, &t, view, &labels, page_count);
+                        page_field(ui, &t, view, &labels, page_count, FIELD_H);
                         if icons::button(ui, "chevron-down", B, false, tl!("Next page")).clicked() {
                             view.step_page(true);
                         }
@@ -1320,7 +1322,7 @@ fn find_text_field(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
 /// history buttons (the zoom field and its presets stay); 2 also moves page display, rotate and
 /// fit into a ⋯ menu, with the view history.
 /// The zoom field (type a percentage and press Enter) and its presets menu.
-fn zoom_field(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView) {
+fn zoom_field(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, field_h: f32) {
     let zoom_id = egui::Id::unique("zoom-input");
     let draft = zoom_id.with("draft");
     let mut typed = ui.data(|d| d.get_temp::<String>(draft)).unwrap_or_else(|| format!("{:.0}%", view.zoom * 100.0));
@@ -1331,7 +1333,7 @@ fn zoom_field(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView) {
         .text_color(t.text)
         .frame(egui::Frame::NONE)
         .margin(RAIL_FIELD_MARGIN);
-    let r = rail_field(ui, t, edit).on_hover_text(tl!("Zoom — type a percentage and press Enter"));
+    let r = rail_field(ui, t, edit, field_h).on_hover_text(tl!("Zoom — type a percentage and press Enter"));
     ui.ctx().accesskit_node_builder(zoom_id, |node| node.set_label(tl!("Zoom")));
     if r.gained_focus() {
         let mut state = egui::TextEdit::load_state(ui.ctx(), zoom_id).unwrap_or_default();
@@ -1365,7 +1367,7 @@ fn zoom_field(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView) {
 }
 
 /// The current page field, with the page count after it.
-fn page_field(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, labels: &[String], page_count: usize) {
+fn page_field(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, labels: &[String], page_count: usize, field_h: f32) {
     let page_input_id = view.page_input_id();
     // Consume replacement selection once, including when the editor has lost focus.
     let reselect = std::mem::take(&mut view.page_input_reselect);
@@ -1384,7 +1386,7 @@ fn page_field(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, labels: &[Strin
         .font(theme::medium(12.0))
         .frame(egui::Frame::NONE)
         .margin(RAIL_FIELD_MARGIN);
-    let r = rail_field(ui, t, edit)
+    let r = rail_field(ui, t, edit, field_h)
         .on_hover_text(tl!("Current page — type a page number or label (such as iv) and press Enter"))
         .accessible_name(tl!("Current page"));
     if r.lost_focus() {
@@ -1438,7 +1440,7 @@ fn nav_cluster(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, level: u8) 
     if icons::button(ui, "chevron-up", B, false, tl!("Previous page")).clicked() {
         view.step_page(false);
     }
-    page_field(ui, t, view, &labels, page_count);
+    page_field(ui, t, view, &labels, page_count, RAIL_FIELD_SIZE[1]);
     if icons::button(ui, "chevron-down", B, false, tl!("Next page")).clicked() {
         view.step_page(true);
     }
@@ -1473,7 +1475,7 @@ fn nav_cluster(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, level: u8) 
     if level == 0 && icons::button(ui, "zoom-out", B, false, &tip).clicked() {
         view.zoom_step(false);
     }
-    zoom_field(ui, t, view);
+    zoom_field(ui, t, view, RAIL_FIELD_SIZE[1]);
     let tip = crate::commands::key_tip(ui.ctx(), tl!("Zoom in ({key})"), crate::commands::ZOOM_IN);
     if level == 0 && icons::button(ui, "zoom-in", B, false, &tip).clicked() {
         view.zoom_step(true);
@@ -1521,14 +1523,14 @@ const RAIL_FIELD_MARGIN: egui::Vec2 = egui::vec2(1.0, 4.0);
 
 /// A field to type in: boxed, and the same size whatever it holds, so the page and zoom fields
 /// match. Sized outright: a text field is at least a control wide.
-fn rail_field(ui: &mut egui::Ui, t: &Tokens, edit: egui::TextEdit<'_>) -> egui::Response {
+fn rail_field(ui: &mut egui::Ui, t: &Tokens, edit: egui::TextEdit<'_>, height: f32) -> egui::Response {
     egui::Frame::NONE
         .fill(t.field)
         .stroke(Stroke::new(1.0, t.border))
         .corner_radius(CornerRadius::same(5))
         .show(ui, |ui| {
             ui.spacing_mut().interact_size.x = 0.0;
-            ui.add_sized(RAIL_FIELD_SIZE, edit)
+            ui.add_sized([RAIL_FIELD_SIZE[0], height], edit)
         })
         .inner
 }
